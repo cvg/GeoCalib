@@ -1,0 +1,4 @@
+model:
+  name: networks.geocalib_pretrained
+  camera_model: simple_radial
+  model_weights: distorted

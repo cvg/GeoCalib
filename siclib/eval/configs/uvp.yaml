@@ -1,0 +1,18 @@
+model:
+  name: optimization.vp_from_prior
+  SOLVER_FLAGS: [True, True, True, True, True]
+  magsac_scoring: true
+  min_lines: 5
+  verbose: false
+
+  # RANSAC inlier threshold
+  th_pixels: 3
+
+  # 3 uses the gravity in the LS refinement, 2 does not. Here we use a prior on the gravity, so use 2
+  ls_refinement: 2
+
+  # change to 3 to add a Ceres optimization after the non minimal solver (slower)
+  nms: 1
+
+  # deeplsd, lsd
+  line_type: deeplsd

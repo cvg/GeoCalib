@@ -1,0 +1,10 @@
+defaults:
+  - data: openpano
+  - train: geocalib
+  - model: geocalib
+  - _self_
+
+data:
+  train_batch_size: 24
+  val_batch_size: 24
+  test_batch_size: 24

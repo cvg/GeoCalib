@@ -1,0 +1,35 @@
+default_stages: [commit]
+default_language_version:
+  python: python3.10
+repos:
+  - repo: https://github.com/psf/black
+    rev: 23.9.1
+    hooks:
+      - id: black
+        args: [--line-length=100]
+        exclude: ^(venv/|docs/)
+        types: [python]
+  - repo: https://github.com/PyCQA/flake8
+    rev: 6.1.0
+    hooks:
+      - id: flake8
+        additional_dependencies: [flake8-docstrings]
+        args:
+          [
+            --max-line-length=100,
+            --docstring-convention=google,
+            --ignore=E203 W503 E402 E731,
+          ]
+        exclude: ^(venv/|docs/|.*__init__.py)
+        types: [python]
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+        args: [--line-length=100, --profile=black, --atomic]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.1.1
+    hooks:
+      - id: mypy

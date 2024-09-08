@@ -1,0 +1,14 @@
+torch
+torchvision
+opencv-python
+kornia
+matplotlib
+
+omegaconf
+albumentations
+h5py
+hydra-core
+pandas
+tqdm
+tensorboard
+wandb

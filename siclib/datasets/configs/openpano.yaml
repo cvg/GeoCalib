@@ -1,0 +1,34 @@
+name: openpano
+base_dir: data/openpano
+pano_dir: "${.base_dir}/panoramas"
+images_per_pano: 16
+resize_factor: null
+n_workers: 1
+device: cpu
+overwrite: true
+parameter_dists:
+  roll:
+    type: uniform # uni[-45, 45]
+    options:
+      loc: -0.7853981633974483 # -45 degrees
+      scale: 1.5707963267948966 # 90 degrees
+  pitch:
+    type: uniform # uni[-45, 45]
+    options:
+      loc: -0.7853981633974483 # -45 degrees
+      scale: 1.5707963267948966 # 90 degrees
+  vfov:
+    type: uniform # uni[20, 105]
+    options:
+      loc: 0.3490658503988659 # 20 degrees
+      scale: 1.48352986419518 # 85 degrees
+  resize_factor:
+    type: uniform
+    options:
+      loc: 1.2
+      scale: 0.5
+  shape:
+    type: fix
+    value:
+      - 640
+      - 640
