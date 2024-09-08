@@ -1,0 +1,38 @@
+defaults:
+  - data: openpano-radial
+  - train: geocalib
+  - model: geocalib
+  - _self_
+
+data:
+  # smaller batch size since lm takes more memory
+  train_batch_size: 18
+  val_batch_size: 18
+  test_batch_size: 18
+
+model:
+  optimizer:
+    camera_model: simple_radial
+
+  weights: weights/geocalib.tar
+
+train:
+  lr: 1e-5 # smaller lr since we are fine-tuning
+  num_steps: 200_000 # adapt to see same number of samples as previous training
+
+  lr_schedule:
+    type: SequentialLR
+    on_epoch: false
+    options:
+      # adapt to see same number of samples as previous training
+      milestones: [5_000]
+      schedulers:
+        - type: LinearLR
+          options:
+            start_factor: 1e-3
+            total_iters: 5_000
+        - type: MultiStepLR
+          options:
+            gamma: 0.1
+            # adapt to see same number of samples as previous training
+            milestones: [110_000, 170_000]

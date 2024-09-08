@@ -1,0 +1,50 @@
+seed: 0
+num_steps: 150_000
+
+writer: null
+log_every_iter: 500
+eval_every_iter: 1000
+
+lr: 1e-4
+optimizer: adamw
+clip_grad: 1.0
+best_key: loss/param_total
+
+lr_schedule:
+  type: SequentialLR
+  on_epoch: false
+  options:
+    milestones: [4_000]
+    schedulers:
+      - type: LinearLR
+        options:
+          start_factor: 1e-3
+          total_iters: 4_000
+      - type: MultiStepLR
+        options:
+          gamma: 0.1
+          milestones: [80_000, 130_000]
+
+submodules: []
+
+median_metrics:
+  - roll_error
+  - pitch_error
+  - gravity_error
+  - vfov_error
+  - up_angle_error
+  - latitude_angle_error
+  - up_angle_recall@1
+  - up_angle_recall@5
+  - up_angle_recall@10
+  - latitude_angle_recall@1
+  - latitude_angle_recall@5
+  - latitude_angle_recall@10
+
+recall_metrics:
+  roll_error: [1, 3, 5, 10]
+  pitch_error: [1, 3, 5, 10]
+  gravity_error: [1, 3, 5, 10]
+  vfov_error: [1, 3, 5, 10]
+
+plot: [3, "siclib.visualization.visualize_batch.make_perspective_figures"]

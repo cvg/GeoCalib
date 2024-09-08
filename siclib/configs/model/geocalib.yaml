@@ -1,0 +1,31 @@
+name: networks.geocalib
+
+ll_enc:
+  name: encoders.low_level_encoder
+
+backbone:
+  name: encoders.mscan
+  weights: weights/mscan_b.pth
+
+perspective_decoder:
+  name: decoders.perspective_decoder
+
+  up_decoder:
+    name: decoders.up_decoder
+    loss_type: l1
+    use_uncertainty_loss: true
+    decoder:
+      name: decoders.light_hamburger
+      predict_uncertainty: true
+
+  latitude_decoder:
+    name: decoders.latitude_decoder
+    loss_type: l1
+    use_uncertainty_loss: true
+    decoder:
+      name: decoders.light_hamburger
+      predict_uncertainty: true
+
+optimizer:
+  name: optimization.lm_optimizer
+  camera_model: pinhole

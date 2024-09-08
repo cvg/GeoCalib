@@ -1,0 +1,22 @@
+seed: 0
+num_steps: 20_000
+log_every_iter: 500
+eval_every_iter: 3000
+test_every_epoch: 1
+writer: null
+lr: 1.0e-4
+clip_grad: 1.0
+lr_schedule:
+  type: null
+optimizer: adam
+submodules: []
+median_metrics:
+  - roll_error
+  - pitch_error
+  - vfov_error
+recall_metrics:
+  roll_error: [1, 5, 10]
+  pitch_error: [1, 5, 10]
+  vfov_error: [1, 5, 10]
+
+plot: [3, "siclib.visualization.visualize_batch.make_perspective_figures"]

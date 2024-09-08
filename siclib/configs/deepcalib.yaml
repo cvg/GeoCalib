@@ -1,0 +1,12 @@
+defaults:
+  - data: openpano-radial
+  - train: deepcalib
+  - model: deepcalib
+  - _self_
+
+data:
+  train_batch_size: 32
+  val_batch_size: 32
+  test_batch_size: 32
+  augmentations:
+    name: "deepcalib"

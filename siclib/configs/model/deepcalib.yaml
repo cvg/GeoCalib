@@ -1,0 +1,7 @@
+name: networks.deepcalib
+bounds:
+  roll: [-45, 45]
+  # rho = torch.tan(pitch) / torch.tan(vfov / 2) / 2 -> rho in [-1/0.3526, 1/0.0872]
+  rho: [-2.83607487, 2.83607487]
+  vfov: [20, 105]
+  k1_hat: [-0.7, 0.7]
