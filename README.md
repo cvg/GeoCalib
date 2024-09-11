@@ -11,9 +11,9 @@
   </p>
   <h2 align="center">
     <p>ECCV 2024</p>
-    <a href="" align="center">Paper</a> | <!--TODO: update link-->
-    <a href="https://colab.research.google.com/drive/1oMzgPGppAPAIQxe-s7SRd_q8r7dVfnqo#scrollTo=etdzQZQzoo-K" align="center">Colab</a> | 
-    <a href="https://huggingface.co/spaces/veichta/GeoCalib" align="center">Demo 🤗</a>
+    <a href="https://arxiv.org/pdf/2409.06704" align="center">Paper</a> | 
+    <a href="https://veichta-geocalib.hf.space" align="center">Demo 🤗</a> | 
+    <a href="https://colab.research.google.com/drive/1oMzgPGppAPAIQxe-s7SRd_q8r7dVfnqo#scrollTo=etdzQZQzoo-K" align="center">Colab</a>
   </h2>
   
 </p>
@@ -35,7 +35,7 @@ GeoCalib is a an algoritm for single-image calibration: it estimates the camera 
 ## Setup and demo 
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1oMzgPGppAPAIQxe-s7SRd_q8r7dVfnqo#scrollTo=etdzQZQzoo-K)
-[![Hugging Face](https://img.shields.io/badge/Gradio-Demo-blue)](https://huggingface.co/spaces/veichta/GeoCalib)
+[![Hugging Face](https://img.shields.io/badge/Gradio-Demo-blue)](https://veichta-geocalib.hf.space)
 
 We provide a small inference package [`geocalib`](geocalib) that requires only minimal dependencies and Python >= 3.9. First clone the repository and install the dependencies:
 
