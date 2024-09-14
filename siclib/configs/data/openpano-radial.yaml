@@ -1,0 +1,20 @@
+name: simple_dataset
+dataset_dir: data/openpano/openpano_radial
+
+preprocessing:
+  resize: 320
+  side: short
+
+augmentations:
+  name: geocalib
+grayscale: false
+
+use_up: true
+use_latitude: true
+
+train_batch_size: 64
+val_batch_size: 64
+test_batch_size: 64
+
+num_workers: 8
+prefetch_factor: 2

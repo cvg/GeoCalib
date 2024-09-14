@@ -8,7 +8,7 @@ import numpy as np
 import spaces
 import torch
 
-from geocalib import viz2d
+from geocalib import logger, viz2d
 from geocalib.camera import camera_models
 from geocalib.extractor import GeoCalib
 from geocalib.perspective_fields import get_perspective_field
@@ -31,7 +31,7 @@ description = """
   </p>
   <h2 align="center">
     <p>ECCV 2024</p>
-    <a href="" align="center">Paper</a> | <!--TODO: update link-->
+    <a href="https://arxiv.org/pdf/2409.06704" align="center">Paper</a> |
     <a href="https://github.com/cvg/GeoCalib" align="center">Code</a> |
     <a href="https://colab.research.google.com/drive/1oMzgPGppAPAIQxe-s7SRd_q8r7dVfnqo#scrollTo=etdzQZQzoo-K" align="center">Colab</a>
   </h2>
@@ -102,10 +102,9 @@ def process_results(
         raise gr.Error("Please upload an image first.")
 
     img = model.load_image(image_path)
-    print("Running inference...")
     start = time()
     inference_result = inference(img, camera_model)
-    print(f"Done ({time() - start:.2f}s)")
+    logger.info(f"Calibration took {time() - start:.2f} sec. ({camera_model})")
     inference_result["image"] = img.cpu()
 
     if inference_result is None:
@@ -157,10 +156,12 @@ def update_plot(
         viz2d.plot_latitudes([lat[0, 0]], axes=[ax[0]])
 
     if plot_up_confidence:
-        viz2d.plot_confidences([inference_result["up_confidence"][0]], axes=[ax[0]])
+        viz2d.plot_confidences([torch.tensor(inference_result["up_confidence"][0])], axes=[ax[0]])
 
     if plot_latitude_confidence:
-        viz2d.plot_confidences([inference_result["latitude_confidence"][0]], axes=[ax[0]])
+        viz2d.plot_confidences(
+            [torch.tensor(inference_result["latitude_confidence"][0])], axes=[ax[0]]
+        )
 
     fig.canvas.draw()
     img = np.array(fig.canvas.renderer.buffer_rgba())
