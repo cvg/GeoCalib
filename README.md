@@ -29,7 +29,7 @@
 
 ##
 
-GeoCalib is an algoritm for single-image calibration: it estimates the camera intrinsics and gravity direction from a single image only. By combining geometric optimization with deep learning, GeoCalib provides a more flexible and accurate calibration compared to previous approaches. This repository hosts the [inference](#setup-and-demo), [evaluation](#evaluation), and [training](#training) code for GeoCalib and instructions to download our training set [OpenPano](#openpano-dataset).
+GeoCalib is an algorithm for single-image calibration: it estimates the camera intrinsics and gravity direction from a single image only. By combining geometric optimization with deep learning, GeoCalib provides a more flexible and accurate calibration compared to previous approaches. This repository hosts the [inference](#setup-and-demo), [evaluation](#evaluation), and [training](#training) code for GeoCalib and instructions to download our training set [OpenPano](#openpano-dataset).
 
 
 ## Setup and demo 
@@ -62,7 +62,7 @@ print("camera:", result["camera"])
 print("gravity:", result["gravity"])
 ```
 
-When either the intrinsics or the gravity are already know, they can be provided:
+When either the intrinsics or the gravity are already known, they can be provided:
 
 ```python
 # known intrinsics:
