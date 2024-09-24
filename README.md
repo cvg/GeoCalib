@@ -13,7 +13,8 @@
     <p>ECCV 2024</p>
     <a href="https://arxiv.org/pdf/2409.06704" align="center">Paper</a> | 
     <a href="https://veichta-geocalib.hf.space" align="center">Demo 🤗</a> | 
-    <a href="https://colab.research.google.com/drive/1oMzgPGppAPAIQxe-s7SRd_q8r7dVfnqo#scrollTo=etdzQZQzoo-K" align="center">Colab</a>
+    <a href="https://colab.research.google.com/drive/1oMzgPGppAPAIQxe-s7SRd_q8r7dVfnqo#scrollTo=etdzQZQzoo-K" align="center">Colab</a> |
+    <a href="https://youtu.be/uOmTwvKreM4" align="center">Video</a>
   </h2>
   
 </p>
