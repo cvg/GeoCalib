@@ -63,29 +63,6 @@ print("camera:", result["camera"])
 print("gravity:", result["gravity"])
 ```
 
-When either the intrinsics or the gravity are already known, they can be provided:
-
-```python
-# known intrinsics:
-result = model.calibrate(image, priors={"focal": focal_length_tensor})
-
-# known gravity:
-result = model.calibrate(image, priors={"gravity": gravity_direction_tensor})
-```
-
-The default model is optimized for pinhole images. To handle lens distortion, use the following:
-
-```python
-model = GeoCalib(weights="distorted")  # default is "pinhole"
-result = model.calibrate(image, camera_model="simple_radial")  # or pinhole, simple_divisional
-```
-
-To calibrate multiple images captured by the same camera, pass a list of images to GeoCalib:
-```python
-# batch is a list of tensors, each with shape [C, H, W]
-result = model.calibrate(batch, shared_intrinsics=True)
-```
-
 Check out our [demo notebook](demo.ipynb) for a full working example.
 
 <details>
@@ -129,6 +106,37 @@ model = torch.hub.load("cvg/GeoCalib", "GeoCalib", trust_repo=True)
 ```
 
 </details>
+
+### Partial calibration
+When either the intrinsics or the gravity are already known, they can be provided:
+
+```python
+# known intrinsics:
+result = model.calibrate(image, priors={"focal": focal_length_tensor})
+
+# known gravity:
+result = model.calibrate(image, priors={"gravity": gravity_direction_tensor})
+```
+
+### Camera models
+GeoCalib currently supports the following camera models via the `camera_model` parameter:
+1. `pinhole` (default) models only the focal lengths `fx` and `fy` but no lens distortion.
+2. `simple_radial` models weak distortions with a single polynomial distortion parameter `k1`.
+3. `simple_divisional` models strong fisheye distortions with a single distortion parameter `k1`, as proposed by Fitzgibbon in [_Simultaneous linear estimation of multiple view geometry and lens distortion_](https://www.robots.ox.ac.uk/~vgg/publications/2001/Fitzgibbon01b/fitzgibbon01b.pdf) (CVPR 2001).
+
+The default model is optimized for pinhole images. To handle lens distortion, use the following:
+```python
+model = GeoCalib(weights="distorted")  # default is "pinhole"
+result = model.calibrate(image, camera_model="simple_radial")  # or pinhole, simple_divisional
+```
+The principal point is assumed to be at the center of the image and is not optimized. Additional models can be implemented by extending the [`Camera`](geocalib/camera.py) object.
+
+### Multi-image calibration
+To calibrate multiple images captured by the same camera, pass a list of images to GeoCalib:
+```python
+# batch is a list of tensors, each with shape [C, H, W]
+result = model.calibrate(batch, shared_intrinsics=True)
+```
 
 ## Evaluation
 
