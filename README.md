@@ -56,8 +56,8 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 model = GeoCalib().to(device)
 
 # load image as tensor in range [0, 1] with shape [C, H, W]
-img = model.load_image("path/to/image.jpg").to(device)
-result = model.calibrate(img)
+image = model.load_image("path/to/image.jpg").to(device)
+result = model.calibrate(image)
 
 print("camera:", result["camera"])
 print("gravity:", result["gravity"])
@@ -67,17 +67,23 @@ When either the intrinsics or the gravity are already known, they can be provide
 
 ```python
 # known intrinsics:
-result = model.calibrate(img, priors={"focal": focal_length_tensor})
+result = model.calibrate(image, priors={"focal": focal_length_tensor})
 
 # known gravity:
-result = model.calibrate(img, priors={"gravity": gravity_direction_tensor})
+result = model.calibrate(image, priors={"gravity": gravity_direction_tensor})
 ```
 
 The default model is optimized for pinhole images. To handle lens distortion, use the following:
 
 ```python
 model = GeoCalib(weights="distorted")  # default is "pinhole"
-result = model.calibrate(img, camera_model="simple_radial")  # or pinhole, simple_divisional
+result = model.calibrate(image, camera_model="simple_radial")  # or pinhole, simple_divisional
+```
+
+To calibrate multiple images captured by the same camera, pass a list of images to GeoCalib:
+```python
+# batch is a list of tensors, each with shape [C, H, W]
+result = model.calibrate(batch, shared_intrinsics=True)
 ```
 
 Check out our [demo notebook](demo.ipynb) for a full working example.
