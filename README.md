@@ -107,17 +107,6 @@ model = torch.hub.load("cvg/GeoCalib", "GeoCalib", trust_repo=True)
 
 </details>
 
-### Partial calibration
-When either the intrinsics or the gravity are already known, they can be provided:
-
-```python
-# known intrinsics:
-result = model.calibrate(image, priors={"focal": focal_length_tensor})
-
-# known gravity:
-result = model.calibrate(image, priors={"gravity": gravity_direction_tensor})
-```
-
 ### Camera models
 GeoCalib currently supports the following camera models via the `camera_model` parameter:
 1. `pinhole` (default) models only the focal lengths `fx` and `fy` but no lens distortion.
@@ -130,6 +119,17 @@ model = GeoCalib(weights="distorted")  # default is "pinhole"
 result = model.calibrate(image, camera_model="simple_radial")  # or pinhole, simple_divisional
 ```
 The principal point is assumed to be at the center of the image and is not optimized. Additional models can be implemented by extending the [`Camera`](geocalib/camera.py) object.
+
+### Partial calibration
+When either the intrinsics or the gravity are already known, they can be provided as follows:
+
+```python
+# known intrinsics:
+result = model.calibrate(image, priors={"focal": focal_length_tensor})
+
+# known gravity:
+result = model.calibrate(image, priors={"gravity": gravity_direction_tensor})
+```
 
 ### Multi-image calibration
 To calibrate multiple images captured by the same camera, pass a list of images to GeoCalib:
