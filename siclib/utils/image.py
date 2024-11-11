@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torchvision
 from omegaconf import OmegaConf
+from PIL import Image
 
 from siclib.utils.tensor import fit_features_to_multiple
 
@@ -87,6 +88,19 @@ class ImagePreprocessor:
                 align_corners=self.conf.align_corners,
                 interpolation=interpolation,
             )
+        elif self.conf.resize_backend == "PIL":
+            device = img.device
+            imgs = []
+            has_batch_dim = img.ndim == 4
+            img = img if has_batch_dim else img[None]
+            for im in img:
+                im = (im.permute(1, 2, 0) * 255).cpu().numpy().astype(np.uint8)
+                im = Image.fromarray(im).resize(size[::-1], Image.BILINEAR)
+                im = torch.tensor(np.array(im)).permute(2, 0, 1) / 255.0
+                imgs.append(im.to(device))
+            imgs = torch.stack(imgs)
+            return imgs if has_batch_dim else imgs[0]
+
         elif self.conf.resize_backend == "torchvision":
             return torchvision.transforms.Resize(size, antialias=self.conf.antialias)(img)
         else:

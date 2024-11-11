@@ -176,7 +176,16 @@ python -m siclib.eval.lamar2k --conf deepcalib --tag deepcalib --overwrite
 <details>
 <summary>[Evaluate Perspective Fields]</summary>
 
-Coming soon!
+To evaluate Perspective Fields, first setup the files following the instructions in the [ParamNet-siclib](https://github.com/veichta/ParamNet-siclib) repository. Then run:
+
+```bash
+python -m siclib.eval.lamar2k --conf perspective-cities data.preprocessing.resize_backend="PIL" --overwrite
+```
+To evaluate the model trained on our OpenPano dataset, run:
+
+```bash
+python -m siclib.eval.lamar2k --conf perspective-openpano --overwrite
+```
 
 </details>
 
@@ -208,12 +217,13 @@ python -m siclib.eval.lamar2k --checkpoint <experiment name> --tag <eval name> -
 
 Here are the results for the Area Under the Curve (AUC) for the roll, pitch and field of view (FoV) errors at 1/5/10 degrees for the different methods:
 
-| Approach  | Roll               | Pitch              | FoV                |
-| --------- | ------------------ | ------------------ | ------------------ |
-| DeepCalib | 44.1 / 73.9 / 84.8 | 10.8 / 28.3 / 49.8 | 0.7 / 13.0 / 24.0  |
-| ParamNet  | 51.7 / 77.0 / 86.0 | 27.0 / 52.7 / 70.2 | 02.8 / 06.8 / 14.3 |
-| UVP       | 72.7 / 81.8 / 85.7 | 42.3 / 59.9 / 69.4 | 15.6 / 30.6 / 43.5 |
-| GeoCalib  | 86.4 / 92.5 / 95.0 | 55.0 / 76.9 / 86.2 | 19.1 / 41.5 / 60.0 |
+| Approach            | Roll               | Pitch              | FoV                |
+| ------------------- | ------------------ | ------------------ | ------------------ |
+| DeepCalib           | 44.1 / 73.9 / 84.8 | 10.8 / 28.3 / 49.8 | 00.7 / 13.0 / 24.0 |
+| ParamNet            | 38.7 / 69.4 / 82.8 | 19.0 / 44.7 / 65.7 | 01.8 / 06.2 / 13.2 |
+| ParamNet (OpenPano) | 51.7 / 77.0 / 86.0 | 27.0 / 52.7 / 70.2 | 02.8 / 06.8 / 14.3 |
+| UVP                 | 72.7 / 81.8 / 85.7 | 42.3 / 59.9 / 69.4 | 15.6 / 30.6 / 43.5 |
+| GeoCalib            | 86.4 / 92.5 / 95.0 | 55.0 / 76.9 / 86.2 | 19.1 / 41.5 / 60.0 |
 </details>
 
 ### MegaDepth
@@ -251,7 +261,17 @@ python -m siclib.eval.megadepth2k --conf deepcalib --tag deepcalib --overwrite
 <details>
 <summary>[Evaluate Perspective Fields]</summary>
 
-Coming soon!
+To evaluate Perspective Fields, first setup the files following the instructions in the [ParamNet-siclib](https://github.com/veichta/ParamNet-siclib) repository. Then run:
+
+```bash
+python -m siclib.eval.megadepth2k --conf perspective-cities data.preprocessing.resize_backend="PIL" --overwrite
+```
+
+To evaluate the model trained on our OpenPano dataset, run:
+
+```bash
+python -m siclib.eval.megadepth2k --conf perspective-openpano --overwrite
+```
 
 </details>
 
@@ -282,12 +302,13 @@ python -m siclib.eval.megadepth2k --checkpoint <experiment name> --tag <eval nam
 
 Here are the results for the Area Under the Curve (AUC) for the roll, pitch and field of view (FoV) errors at 1/5/10 degrees for the different methods:
 
-| Approach  | Roll               | Pitch              | FoV                |
-| --------- | ------------------ | ------------------ | ------------------ |
-| DeepCalib | 34.6 / 65.4 / 79.4 | 11.9 / 27.8 / 44.8 | 5.6 / 12.1 / 22.9  |
-| ParamNet  | 43.4 / 70.7 / 82.2 | 15.4 / 34.5 / 53.3 | 3.2 / 10.1 / 21.3  |
-| UVP       | 69.2 / 81.6 / 86.9 | 21.6 / 36.2 / 47.4 | 8.2 / 18.7 / 29.8  |
-| GeoCalib  | 82.6 / 90.6 / 94.0 | 32.4 / 53.3 / 67.5 | 13.6 / 31.7 / 48.2 |
+| Approach            | Roll               | Pitch              | FoV                |
+| ------------------- | ------------------ | ------------------ | ------------------ |
+| DeepCalib           | 34.6 / 65.4 / 79.4 | 11.9 / 27.8 / 44.8 | 5.6 / 12.1 / 22.9  |
+| ParamNet            | 37.0 / 66.4 / 80.8 | 15.8 / 37.3 / 57.1 | 5.3 / 12.8 / 24.0  |
+| ParamNet (OpenPano) | 43.4 / 70.7 / 82.2 | 15.4 / 34.5 / 53.3 | 3.2 / 10.1 / 21.3  |
+| UVP                 | 69.2 / 81.6 / 86.9 | 21.6 / 36.2 / 47.4 | 8.2 / 18.7 / 29.8  |
+| GeoCalib            | 82.6 / 90.6 / 94.0 | 32.4 / 53.3 / 67.5 | 13.6 / 31.7 / 48.2 |
 </details>
 
 ### TartanAir
@@ -319,7 +340,17 @@ python -m siclib.eval.tartanair --conf deepcalib --tag deepcalib --overwrite
 <details>
 <summary>[Evaluate Perspective Fields]</summary>
 
-Coming soon!
+To evaluate Perspective Fields, first setup the files following the instructions in the [ParamNet-siclib](https://github.com/veichta/ParamNet-siclib) repository. Then run:
+
+```bash
+python -m siclib.eval.tartanair --conf perspective-cities data.preprocessing.resize_backend="PIL" --overwrite
+```
+
+To evaluate the model trained on our OpenPano dataset, run:
+
+```bash
+python -m siclib.eval.tartanair --conf perspective-openpano --overwrite
+```
 
 </details>
 
@@ -350,12 +381,13 @@ python -m siclib.eval.tartanair --checkpoint <experiment name> --tag <eval name>
 
 Here are the results for the Area Under the Curve (AUC) for the roll, pitch and field of view (FoV) errors at 1/5/10 degrees for the different methods:
 
-| Approach  | Roll               | Pitch              | FoV                |
-| --------- | ------------------ | ------------------ | ------------------ |
-| DeepCalib | 24.7 / 55.4 / 71.5 | 16.3 / 38.8 / 58.5 | 1.5 / 8.8 / 27.2   |
-| ParamNet  | 34.5 / 59.2 / 73.9 | 19.4 / 42.0 / 60.3 | 6.0 / 16.8 / 31.6  |
-| UVP       | 52.1 / 64.8 / 71.9 | 36.2 / 48.8 / 58.6 | 15.8 / 25.8 / 35.7 |
-| GeoCalib  | 71.3 / 83.8 / 89.8 | 38.2 / 62.9 / 76.6 | 14.1 / 30.4 / 47.6 |
+| Approach            | Roll               | Pitch              | FoV                |
+| ------------------- | ------------------ | ------------------ | ------------------ |
+| DeepCalib           | 24.7 / 55.4 / 71.5 | 16.3 / 38.8 / 58.5 | 01.5 / 08.8 / 27.2 |
+| ParamNet            | 23.3 / 51.4 / 71.0 | 19.9 / 43.8 / 62.9 | 08.5 / 22.5 / 40.8 |
+| ParamNet (OpenPano) | 34.5 / 59.2 / 73.9 | 19.4 / 42.0 / 60.3 | 06.0 / 16.8 / 31.6 |
+| UVP                 | 52.1 / 64.8 / 71.9 | 36.2 / 48.8 / 58.6 | 15.8 / 25.8 / 35.7 |
+| GeoCalib            | 71.3 / 83.8 / 89.8 | 38.2 / 62.9 / 76.6 | 14.1 / 30.4 / 47.6 |
 </details>
 
 ### Stanford2D3D
@@ -388,7 +420,17 @@ python -m siclib.eval.stanford2d3d --conf deepcalib --tag deepcalib --overwrite
 <details>
 <summary>[Evaluate Perspective Fields]</summary>
 
-Coming soon!
+To evaluate Perspective Fields, first setup the files following the instructions in the [ParamNet-siclib](https://github.com/veichta/ParamNet-siclib) repository. Then run:
+
+```bash
+python -m siclib.eval.stanford2d3d --conf perspective-cities data.preprocessing.resize_backend="PIL" --overwrite
+```
+
+To evaluate the model trained on our OpenPano dataset, run:
+
+```bash
+python -m siclib.eval.stanford2d3d --conf perspective-openpano --overwrite
+```
 
 </details>
 
@@ -419,12 +461,13 @@ python -m siclib.eval.stanford2d3d --checkpoint <experiment name> --tag <eval na
 
 Here are the results for the Area Under the Curve (AUC) for the roll, pitch and field of view (FoV) errors at 1/5/10 degrees for the different methods:
 
-| Approach  | Roll               | Pitch              | FoV                |
-| --------- | ------------------ | ------------------ | ------------------ |
-| DeepCalib | 33.8 / 63.9 / 79.2 | 21.6 / 46.9 / 65.7 | 8.1 / 20.6 / 37.6  |
-| ParamNet  | 44.6 / 73.9 / 84.8 | 29.2 / 56.7 / 73.1 | 5.8 / 14.3 / 27.8  |
-| UVP       | 65.3 / 74.6 / 79.1 | 51.2 / 63.0 / 69.2 | 22.2 / 39.5 / 51.3 |
-| GeoCalib  | 83.1 / 91.8 / 94.8 | 52.3 / 74.8 / 84.6 | 17.4 / 40.0 / 59.4 |
+| Approach            | Roll               | Pitch              | FoV                |
+| ------------------- | ------------------ | ------------------ | ------------------ |
+| DeepCalib           | 33.8 / 63.9 / 79.2 | 21.6 / 46.9 / 65.7 | 08.1 / 20.6 / 37.6 |
+| ParamNet            | 20.6 / 48.5 / 68.1 | 20.9 / 44.2 / 61.5 | 07.4 / 18.0 / 33.2 |
+| ParamNet (OpenPano) | 44.6 / 73.9 / 84.8 | 29.2 / 56.7 / 73.1 | 05.8 / 14.3 / 27.8 |
+| UVP                 | 65.3 / 74.6 / 79.1 | 51.2 / 63.0 / 69.2 | 22.2 / 39.5 / 51.3 |
+| GeoCalib            | 83.1 / 91.8 / 94.8 | 52.3 / 74.8 / 84.6 | 17.4 / 40.0 / 59.4 |
 
 </details>
 
