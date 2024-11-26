@@ -10,7 +10,6 @@ Based on PyTorch tensors: differentiable, batched, with GPU support.
 from abc import abstractmethod
 from typing import Dict, Optional, Tuple, Union
 
-import numpy as np
 import torch
 from torch.func import jacfwd, vmap
 from torch.nn import functional as F
@@ -459,7 +458,7 @@ class BaseCamera(TensorWrapper):
             resize_factor = self.new_tensor(resize_factor)
 
         assert isinstance(pano_img, torch.Tensor), "Panorama image must be a torch.Tensor."
-        pano_img = pano_img if pano_img.dim() == 4 else pano_img.unsqueeze(0)  # B x H x W x 3
+        pano_img = pano_img if pano_img.dim() == 4 else pano_img.unsqueeze(0)  # B x 3 x H x W
 
         pano_imgs = []
         for i, yaw in enumerate(yaws):
@@ -467,10 +466,9 @@ class BaseCamera(TensorWrapper):
                 # resize the panorama such that the fov of the panorama has the same height as the
                 # image
                 vfov = self.vfov[i] if B != 0 else self.vfov
-                scale = np.pi / float(vfov) * float(h) / pano_img.shape[0] * resize_factor[i]
-                pano_shape = (int(pano_img.shape[0] * scale), int(pano_img.shape[1] * scale))
+                scale = torch.pi / float(vfov) * float(h) / pano_img.shape[-2] * resize_factor[i]
+                pano_shape = (int(pano_img.shape[-2] * scale), int(pano_img.shape[-1] * scale))
 
-                # pano_img = pano_img.permute(2, 0, 1).unsqueeze(0)
                 mode = "bicubic" if scale >= 1 else "area"
                 resized_pano = F.interpolate(pano_img, size=pano_shape, mode=mode)
             else:
