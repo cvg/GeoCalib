@@ -19,18 +19,24 @@ class GeoCalib(nn.Module):
         """Initialize the model with optional config overrides.
 
         Args:
-            weights (str): trained variant, "pinhole" (default) or "distorted".
+            weights (str): Weights to load. Can be "pinhole", "distorted" or path to a checkpoint.
+            Note that in case of custom weights, the architecture must match the original model.
+            If this is not the case, use the extractor from the 'siclib' package
+            (from siclib.models.extractor import GeoCalib).
         """
         super().__init__()
-        if weights not in {"pinhole", "distorted"}:
-            raise ValueError(f"Unknown weights: {weights}")
-        url = f"https://github.com/cvg/GeoCalib/releases/download/v1.0/geocalib-{weights}.tar"
+        if weights in {"pinhole", "distorted"}:
+            url = f"https://github.com/cvg/GeoCalib/releases/download/v1.0/geocalib-{weights}.tar"
 
-        # load checkpoint
-        model_dir = f"{torch.hub.get_dir()}/geocalib"
-        state_dict = torch.hub.load_state_dict_from_url(
-            url, model_dir, map_location="cpu", file_name=f"{weights}.tar"
-        )
+            # load checkpoint
+            model_dir = f"{torch.hub.get_dir()}/geocalib"
+            state_dict = torch.hub.load_state_dict_from_url(
+                url, model_dir, map_location="cpu", file_name=f"{weights}.tar"
+            )
+        elif Path(weights).exists():
+            state_dict = torch.load(weights, map_location="cpu")
+        else:
+            raise ValueError(f"Invalid weights: {weights}")
 
         self.model = Model()
         self.model.flexible_load(state_dict["model"])
