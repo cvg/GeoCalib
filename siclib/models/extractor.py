@@ -8,6 +8,7 @@ import torch.nn as nn
 from torch.nn.functional import interpolate
 
 from siclib.geometry.base_camera import BaseCamera
+from siclib.models import get_model
 from siclib.models.networks.geocalib import GeoCalib as Model
 from siclib.utils.image import ImagePreprocessor, load_image
 
@@ -19,20 +20,24 @@ class GeoCalib(nn.Module):
         """Initialize the model with optional config overrides.
 
         Args:
-            weights (str, optional): Weights to load. Defaults to "pinhole".
+            weights (str): Weights to load. Can be "pinhole", "distorted" or path to a checkpoint.
         """
         super().__init__()
-        if weights not in {"pinhole", "distorted"}:
+        if weights in {"pinhole", "distorted"}:
+            url = f"https://github.com/cvg/GeoCalib/releases/download/v1.0/geocalib-{weights}.tar"
+
+            # load checkpoint
+            model_dir = f"{torch.hub.get_dir()}/geocalib"
+            state_dict = torch.hub.load_state_dict_from_url(
+                url, model_dir, map_location="cpu", file_name=f"{weights}.tar"
+            )
+            self.model = Model({})
+        elif Path(weights).exists():
+            state_dict = torch.load(weights, map_location="cpu")
+            self.model = get_model(state_dict["conf"]["name"])(state_dict["conf"])
+        else:
             raise ValueError(f"Unknown weights: {weights}")
-        url = f"https://github.com/cvg/GeoCalib/releases/download/v1.0/geocalib-{weights}.tar"
 
-        # load checkpoint
-        model_dir = f"{torch.hub.get_dir()}/geocalib"
-        state_dict = torch.hub.load_state_dict_from_url(
-            url, model_dir, map_location="cpu", file_name=f"{weights}.tar"
-        )
-
-        self.model = Model({})
         self.model.flexible_load(state_dict["model"])
         self.model.eval()
 
