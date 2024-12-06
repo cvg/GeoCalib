@@ -34,6 +34,17 @@ class GeoCalib(nn.Module):
             self.model = Model({})
         elif Path(weights).exists():
             state_dict = torch.load(weights, map_location="cpu")
+            state_dict["conf"] = state_dict["conf"]["model"]
+
+            # recursively remove weights from config
+            def remove_weights(d):
+                for k, v in d.items():
+                    if isinstance(v, dict):
+                        remove_weights(v)
+                    elif k == "weights":
+                        d[k] = None
+
+            remove_weights(state_dict["conf"])
             self.model = get_model(state_dict["conf"]["name"])(state_dict["conf"])
         else:
             raise ValueError(f"Unknown weights: {weights}")
