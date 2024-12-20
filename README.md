@@ -500,12 +500,12 @@ python -m siclib.eval.inspect lamar2k geocalib
 
 ## OpenPano Dataset
 
-The OpenPano dataset is a new dataset for single-image calibration which contains about 2.8k panoramas from various sources, namely [HDRMAPS](https://hdrmaps.com/hdris/), [PolyHaven](https://polyhaven.com/hdris), and the [Laval Indoor HDR dataset](http://hdrdb.com/indoor/#presentation). While this dataset is smaller than previous ones, it is publicly available and it provides a better balance between indoor and outdoor scenes.
+The OpenPano dataset is a new dataset for single-image calibration which contains about 2.8k panoramas from various sources, namely [HDRMAPS](https://hdrmaps.com/hdris/), [PolyHaven](https://polyhaven.com/hdris), and the [Laval Photometric Indoor HDR dataset](http://hdrdb.com/indoor-hdr-photometric/). While this dataset is smaller than previous ones, it is publicly available and it provides a better balance between indoor and outdoor scenes.
 
 <details>
 <summary>[Downloading and preparing the dataset]</summary>
 
-In order to assemble the training set, first download the Laval dataset following the instructions on [the corresponding project page](http://hdrdb.com/indoor/#presentation) and place the panoramas in ```data/indoorDatasetCalibrated```. Then, tonemap the HDR images using the following command:
+In order to assemble the training set, first download the Laval dataset following the instructions on [the corresponding project page](http://hdrdb.com/indoor-hdr-photometric/) and place the panoramas in ```data/indoorDatasetCalibrated```. Then, tonemap the HDR images using the following command:
 
 ```bash
 python -m siclib.datasets.utils.tonemapping --hdr_dir data/indoorDatasetCalibrated --out_dir data/laval-tonemap
