@@ -321,5 +321,5 @@ def print_calibration(results: Dict[str, torch.Tensor]) -> None:
     print(f"vFoV:  {vfov.item():.1f}° (± {rad2deg(results['vfov_uncertainty']).item():.1f})°")
     print(f"Focal: {camera.f[0, 1].item():.1f} px (± {results['focal_uncertainty'].item():.1f} px)")
 
-    if hasattr(camera, "k1"):
-        print(f"K1:    {camera.k1.item():.1f}")
+    if hasattr(camera, "dist"):
+        print(f"Dist:    {camera.dist[0, :camera.num_dist_params()].numpy().tolist()}")

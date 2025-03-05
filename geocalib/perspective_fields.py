@@ -118,7 +118,7 @@ def J_up_field(
     # distortion values
     if hasattr(camera, "dist"):
         d_uv = camera.distort(uv, return_scale=True)[0]  # (..., N, 1)
-        d_uv = torch.diag_embed(d_uv.expand(d_uv.shape[:-1] + (2,)))  # (..., N, 2, 2)
+        d_uv_diag = torch.diag_embed(d_uv.expand(d_uv.shape[:-1] + (2,)))  # (..., N, 2, 2)
         offset = camera.up_projection_offset(uv)  # (..., N, 2)
         offset_uv = torch.einsum("...i,...j->...ij", offset, uv)  # (..., N, 2, 2)
 
@@ -130,7 +130,7 @@ def J_up_field(
 
     if hasattr(camera, "dist"):
         # (..., N, 2, 3)
-        J_proj2abc = torch.einsum("...Nij,...Njk->...Nik", d_uv + offset_uv, J_proj2abc)
+        J_proj2abc = torch.einsum("...Nij,...Njk->...Nik", d_uv_diag + offset_uv, J_proj2abc)
 
     J_abc2delta = SphericalManifold.J_plus(gravity.vec3d) if spherical else gravity.J_rp()
     J_proj2delta = torch.einsum("...Nij,...jk->...Nik", J_proj2abc, J_abc2delta)
@@ -144,7 +144,7 @@ def J_up_field(
     J_proj2uv = J_up_projection(uv, gravity.vec3d, wrt="uv")  # (..., N, 2, 2)
 
     if hasattr(camera, "dist"):
-        J_proj2up = torch.einsum("...Nij,...Njk->...Nik", d_uv + offset_uv, J_proj2uv)
+        J_proj2up = torch.einsum("...Nij,...Njk->...Nik", d_uv_diag + offset_uv, J_proj2uv)
         J_proj2duv = torch.einsum("...i,...j->...ji", offset, projected_up2d)
 
         inner = (uv * projected_up2d).sum(-1)[..., None, None]
@@ -164,18 +164,34 @@ def J_up_field(
     J.append(J_up2f)
 
     ######################
-    ##### K1 Jacobian ####
+    ##### Distortion Parameters Jacobian ####
     ######################
 
     if hasattr(camera, "dist"):
-        J_duv = camera.J_distort(uv, wrt="scale2dist")
-        J_duv = torch.diag_embed(J_duv.expand(J_duv.shape[:-1] + (2,)))  # (..., N, 2, 2)
-        J_offset = torch.einsum(
-            "...i,...j->...ij", camera.J_up_projection_offset(uv, wrt="dist"), uv
-        )
-        J_proj2k1 = torch.einsum("...Nij,...Nj->...Ni", J_duv + J_offset, projected_up2d)
-        J_k1 = torch.einsum("...Nij,...Nj->...Ni", J_norm2proj, J_proj2k1)[..., None]
-        J.append(J_k1)
+        # The following is derived from Eq (9) in the paper.
+
+        # Part 1: x * dy
+        J_offset2dist = camera.J_up_projection_offset(uv, wrt="dist") # (B, N, 2) for k1 only or (B, N, 2, K)
+        if len(J_offset2dist.shape) == len(uv.shape):
+            J_offset2dist = J_offset2dist.unsqueeze(-1) # (B, N, 2, K)
+        uv_J_offset2_dist = torch.einsum("...i,...jk->...ijk", uv, J_offset2dist)  # (B, N, 2, 2, K)
+        uv_J_offset2_dist = uv_J_offset2_dist / d_uv[..., None, None]
+
+        # Part 2: dx * y
+        J_duv = camera.J_distort(uv, wrt="scale2dist")  # (B, N, K)
+        uv_offset = torch.einsum("...i,...j->...ij", uv, offset) # (B, N, 2, 2)
+        # (B, N, 2, 2) x (B, N, K) -> (B, N, 2, 2, K)
+        uv_offset_J_duv = torch.einsum("...ij,...k->...ijk", uv_offset, J_duv)
+        uv_offset_J_duv = - uv_offset_J_duv / d_uv[..., None, None]**2
+
+        # (x * dy + dx * y) * projected_up2d
+        # (B, N, 2, [2], K) x (B, N, 2) -> (B, N, 2, K)
+        J_proj2dist = torch.einsum("...Nijk,...Nj->...Nik", uv_J_offset2_dist + uv_offset_J_duv, projected_up2d)
+
+        # (B, N, 2, 2) * (B, N, 2, K) -> (B, N, 2, K)
+        J_dist = torch.matmul(J_norm2proj, J_proj2dist)
+        J.append(J_dist)
+
 
     n_params = sum(j.shape[-1] for j in J)
     return torch.cat(J, axis=-1).reshape(camera.shape[0], h, w, 2, n_params)
@@ -237,7 +253,7 @@ def J_latitude_field(
 
     # Backward
     J = []
-    J_norm2w_to_img = J_vecnorm(uv1)[..., :2]  # (..., N, 2)
+    J_norm2w_to_img = J_vecnorm(uv1)[..., :2]  # (..., N, 3, 2)
 
     ######################
     ## Gravity Jacobian ##
@@ -261,16 +277,22 @@ def J_latitude_field(
     J.append(J_f)
 
     ######################
-    ##### K1 Jacobian ####
+    ##### Distortion Parameters Jacobian ####
     ######################
 
     if hasattr(camera, "dist"):
-        J_w_to_img2k1 = camera.J_image2world(xy, "dist")  # (..., N, 2)
-        # (..., N, 2)
-        J_norm2k1 = torch.einsum("...Nij,...Nj->...Ni", J_norm2w_to_img, J_w_to_img2k1)
-        # (..., N, 1)
-        J_k1 = torch.einsum("...Ni,...i->...N", J_norm2k1, gravity.vec3d).unsqueeze(-1)
-        J.append(J_k1)
+        J_w_to_img2dist = camera.J_image2world(xy, "dist")  # (..., N, 2) for k1-only or (..., N, 2, K) for multiple ks
+        # Add an extra dimension for k1-only case
+        if len(J_w_to_img2dist.shape) == len(xy.shape):
+            J_w_to_img2dist = J_w_to_img2dist.unsqueeze(-1)
+
+        # (B, N, 3, 2) * (B, N, 2, K) -> (B, N, 3, K)
+        J_norm2dist = torch.matmul(J_norm2w_to_img, J_w_to_img2dist)  # (..., N, 3, K)
+
+        # (B, N, 3, K) * (3,) -> (B, N, K)
+        J_dist = torch.einsum("...Nij,...i->...Nj", J_norm2dist, gravity.vec3d)
+        J.append(J_dist)
+
 
     n_params = sum(j.shape[-1] for j in J)
     return torch.cat(J, axis=-1).reshape(camera.shape[0], h, w, 1, n_params)

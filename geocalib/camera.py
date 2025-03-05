@@ -2,6 +2,7 @@
 
 from abc import abstractmethod
 from typing import Dict, Optional, Tuple, Union
+import logging
 
 import torch
 from torch.func import jacfwd, vmap
@@ -34,11 +35,17 @@ class BaseCamera(TensorWrapper):
             data (torch.Tensor): Camera parameters with shape (..., {6, 7, 8}).
         """
         # w, h, fx, fy, cx, cy, dist
+        # TODO: suppport more dist params than k1, k2 in BaseCamera
         assert data.shape[-1] in {6, 7, 8}, data.shape
 
         pad = data.new_zeros(data.shape[:-1] + (8 - data.shape[-1],))
         data = torch.cat([data, pad], -1) if data.shape[-1] != 8 else data
         super().__init__(data)
+
+    @classmethod
+    @abstractmethod
+    def name(cls) -> str:
+        """Name of the camera model."""
 
     @classmethod
     def from_dict(cls, param_dict: Dict[str, torch.Tensor]) -> "BaseCamera":
@@ -167,7 +174,11 @@ class BaseCamera(TensorWrapper):
 
     @autocast
     def project(self, p3d: torch.Tensor) -> Tuple[torch.Tensor]:
-        """Project 3D points into the self plane and check for visibility."""
+        """Project 3D points into the self plane and check for visibility.
+        2D point [x', y']
+        3D point [x, y, z]
+        [x', y'] = [x/z, y/z]
+        """
         z = p3d[..., -1]
         valid = z > self.eps
         z = z.clamp(min=self.eps)
@@ -175,7 +186,13 @@ class BaseCamera(TensorWrapper):
         return p2d, valid
 
     def J_project(self, p3d: torch.Tensor):
-        """Jacobian of the projection function."""
+        """Jacobian of the projection function.
+        2D point [x', y']
+        3D point [x, y, z]
+        [x', y'] = [x/z, y/z]
+        J = [dx'/dx, dx'/dy, dx'/dz] = [1/z, 0, -x/z^2]
+            [dy'/dx, dy'/dy, dy'/dx] = [0, 1/z, -y/z^2]
+        """
         x, y, z = p3d[..., 0], p3d[..., 1], p3d[..., 2]
         zero = torch.zeros_like(z)
         z = z.clamp(min=self.eps)
@@ -502,6 +519,9 @@ class Pinhole(BaseCamera):
 
     Use this model for undistorted images.
     """
+    @classmethod
+    def name(cls) -> str:
+        return "pinhole"
 
     def distort(self, p2d: torch.Tensor, return_scale: bool = False) -> Tuple[torch.Tensor]:
         """Distort normalized 2D coordinates."""
@@ -546,10 +566,19 @@ class SimpleRadial(BaseCamera):
     "An Exact Formula for Calculating Inverse Radial Lens Distortions" by Pierre Drap.
     """
 
+    @classmethod
+    def name(cls) -> str:
+        return "simple_radial"
+
     @property
     def dist(self) -> torch.Tensor:
         """Distortion parameters, with shape (..., 1)."""
         return self._data[..., 6:]
+
+    @classmethod
+    def num_dist_params(cls) -> int:
+        """Number of distortion parameters."""
+        return 1
 
     @property
     def k1(self) -> torch.Tensor:
@@ -620,6 +649,197 @@ class SimpleRadial(BaseCamera):
             return super().J_up_projection_offset(p2d, wrt)
 
 
+class Radial(BaseCamera):
+    """Implementation of the radial camera model.
+
+    Use this model for distorted images.
+
+    The distortion model is 1 + k1 * r^2 + k2 * r^4 where r^2 = x^2 + y^2.
+    The undistortion model is 1 - k1 * r^2 + (3 * k1^2 - k2) * r^4 estimated as in
+    "An Exact Formula for Calculating Inverse Radial Lens Distortions" by Pierre Drap.
+    """
+
+    @classmethod
+    def name(cls) -> str:
+        return "radial"
+
+    @property
+    def dist(self) -> torch.Tensor:
+        """
+        Distortion parameters, with shape (..., 2).
+        Camera parameters with shape (..., {w, h, fx, fy, cx, cy, k1, k2}).
+        """
+        return self._data[..., 6:8]
+
+    @classmethod
+    def num_dist_params(cls) -> int:
+        """Number of distortion parameters."""
+        return 2
+
+    @property
+    def k1(self) -> torch.Tensor:
+        """Distortion parameters, with shape (...)."""
+        return self._data[..., 6]
+
+    @property
+    def k2(self) -> torch.Tensor:
+        """Distortion parameters, with shape (...)."""
+        return self._data[..., 7]
+
+    def update_dist(self, delta: torch.Tensor, dist_range: Tuple[float, float] = (-0.7, 0.7)):
+        """Update the self parameters after changing the k1, k2 distortion parameter."""
+        delta_dist = self.new_ones(self.dist.shape) * delta
+        dist = (self.dist + delta_dist).clamp(*dist_range)
+        data = torch.cat([self.size, self.f, self.c, dist], -1)
+        return self.__class__(data)
+
+    @autocast
+    def check_valid(self, p2d: torch.Tensor) -> torch.Tensor:
+        """Check if the distorted points are valid."""
+        return p2d.new_ones(p2d.shape[:-1]).bool()
+
+    def distort(self, p2d: torch.Tensor, return_scale: bool = False) -> Tuple[torch.Tensor]:
+        """Distort normalized 2D coordinates and check for validity of the distortion model."""
+        r2 = torch.sum(p2d**2, -1, keepdim=True)
+        r4 = r2**2
+        radial = 1 + self.k1[..., None, None] * r2 + self.k2[..., None, None] * r4
+
+        if return_scale:
+            return radial, None
+
+        return p2d * radial, self.check_valid(p2d)
+
+    def J_distort(self, p2d: torch.Tensor, wrt: str = "pts"):
+        """Jacobian of the distortion function.
+        d := the 'scale', 'radial'
+        d = 1 + k1 * r^2 + k2 * r^4
+          = 1 + k1 * (x^2 + y^2) + k2 * (x^2 + y^2)^2
+          = 1 + k1 * (x^2 + y^2) + k2 * (x^4 + 2 * x^2 * y^2 + y^4)
+        
+        dd/dx = 2 * k1 * x + 4 * k2 * x^3 + 2 * k2 * x * y^2
+        dd/dy = 2 * k1 * y + 4 * k2 * y^3 + 2 * k2 * x^2 * y
+
+        dd/dk1 = r^2
+        dd/dk2 = r^4
+        """
+        if wrt == "scale2dist":  # (..., 2)
+            r2 = torch.sum(p2d**2, -1, keepdim=True)  # (..., 1) or (B, N, 1)
+            r4 = r2**2 # (..., 1) or (B, N, 1)
+            return torch.cat([r2, r4], -1) # (..., 2) or (B, N, 2)
+        elif wrt == "scale2pts":  # (..., 2)
+            x = p2d[..., 0:1] # (..., 1) or (B, N, 1)
+            y = p2d[..., 1:2] # (..., 1) or (B, N, 1)
+            x2 = x**2 # (..., 1) or (B, N, 1)
+            y2 = y**2 # (..., 1) or (B, N, 1)
+            x3 = x**3 # (..., 1) or (B, N, 1)
+            y3 = y**3 # (..., 1) or (B, N, 1)
+            # Add 2 extra dimensions to k1, k2 to make then broadcastable with x, y
+            k1 = self.k1[..., None, None] # (..., 1, 1) or (B, 1, 1)
+            k2 = self.k2[..., None, None] # (..., 1, 1) or (B, 1, 1)
+            dd_dx = 2 * k1 * x + 4 * k2 * x3 + 2 * k2 * x * y2  # (..., 1) or (B, N, 1)
+            dd_dy = 2 * k1 * y + 4 * k2 * y3 + 2 * k2 * x2 * y  # (..., 1) or (B, N, 1)
+            return torch.cat([dd_dx, dd_dy], -1) # (..., 2) or (B, N, 2)
+        else:
+            return super().J_distort(p2d, wrt)
+
+    @autocast
+    def undistort(self, p2d: torch.Tensor) -> Tuple[torch.Tensor]:
+        """
+        Undistort normalized 2D coordinates and check for validity of the distortion model.
+        d = 1 - k1 * r^2 + (3 * k1^2 - k2) * r^4
+        """
+        k1 = self.k1[..., None, None]  # (..., 1, 1) or (B, 1, 1)
+        k2 = self.k2[..., None, None]  # (..., 1, 1) or (B, 1, 1)
+        b1 = -k1  # (..., 1, 1) or (B, 1, 1)
+        b2 = 3 * k1**2 - k2  # (..., 1, 1) or (B, 1, 1)
+        r2 = torch.sum(p2d**2, -1, keepdim=True)  # (..., 1) or (B, N, 1)
+        radial = 1 + b1 * r2 + b2 * r2**2  # (..., 1) or (B, N, 1)
+        undistorted_p2d = p2d * radial  # (..., 2) or (B, N, 2)
+        return undistorted_p2d, self.check_valid(p2d)
+
+    @autocast
+    def J_undistort(self, p2d: torch.Tensor, wrt: str = "pts") -> torch.Tensor:
+        """Jacobian of the undistortion function."""
+        k1 = self.k1[..., None, None]  # (..., 1, 1) or (B, 1, 1)
+        k2 = self.k2[..., None, None]  # (..., 1, 1) or (B, 1, 1)
+        b1 = -k1  # (..., 1, 1) or (B, 1, 1)
+        b2 = 3 * k1**2 - k2  # (..., 1, 1) or (B, 1, 1)
+        r2 = torch.sum(p2d**2, -1, keepdim=True)  # (..., 1) or (B, N, 1)
+        r4 = r2**2  # (..., 1) or (B, N, 1)
+
+        if wrt == "dist":
+            J_k1 = (-r2 + 6 * r4 * k1) * p2d  # (..., 2) or (B, N, 2)
+            J_k2 = -r4 * p2d  # (..., 2) or (B, N, 2)
+            J_dist = torch.stack([J_k1, J_k2], -1)  # (..., 2, 2) or (B, N, 2, 2)
+            return J_dist
+        elif wrt == "pts":
+            x = p2d[..., 0:1]  # (..., 1) or (B, N, 1)
+            y = p2d[..., 1:2]  # (..., 1) or (B, N, 1)
+            x2 = x**2  # (..., 1) or (B, N, 1)
+            y2 = y**2  # (..., 1) or (B, N, 1)
+
+            # Hand derived
+            x3 = x**3  # (..., 1) or (B, N, 1)
+            y3 = y**3  # (..., 1) or (B, N, 1)
+            d = 1 + b1 * r2 + b2 * r4  # (..., 1) or (B, N, 1)
+            dd_dx = 2 * b1 * x + 4 * b2 * (x3 + x * y2)  # (..., 1) or (B, N, 1)
+            dd_dy = 2 * b1 * y + 4 * b2 * (y3 + y * x2)  # (..., 1) or (B, N, 1)
+            dxu_dx = d + x * dd_dx  # (..., 1) or (B, N, 1)
+            dyu_dx = y * dd_dx  # (..., 1) or (B, N, 1)
+            dxu_dy = x * dd_dy  # (..., 1) or (B, N, 1)
+            dyu_dy = d + y * dd_dy  # (..., 1) or (B, N, 1)
+
+            # # Derived by Wolfram
+            # x4 = x2**2  # (..., 1) or (B, N, 1)
+            # y4 = y2**2  # (..., 1) or (B, N, 1)
+            # xy = x * y  # (..., 1) or (B, N, 1)
+            # dxu_dx = b1 * (3 * x2 + y2) + b2 * (5 * x4 + 6 * x2 * y2 + y4) + 1  # (..., 1) or (B, N, 1)
+            # dyu_dx = 2 * xy * (b1 + 2 * b2 * r2)  # (..., 1) or (B, N, 1)
+            # dxu_dy = dyu_dx  # (..., 1) or (B, N, 1)
+            # dyu_dy = b1 * (x2 + 3 * y2) + b2 * (x4 + 6 * x2 * y2 + 5 * y4) + 1  # (..., 1) or (B, N, 1)
+
+            # Compose the Jacobian
+            J_x = torch.cat([dxu_dx, dyu_dx], -1)  # (..., 2) or (B, N, 2)
+            J_y = torch.cat([dxu_dy, dyu_dy], -1)  # (..., 2) or (B, N, 2)
+            J_xy = torch.stack([J_x, J_y], -1)  # (..., 2, 2) or (B, N, 2, 2)
+            return J_xy
+        else:
+            return super().J_undistort(p2d, wrt)
+
+    def J_up_projection_offset(self, p2d: torch.Tensor, wrt: str = "uv") -> torch.Tensor:
+        """Jacobian of the up-projection offset.
+        up-projection offset := 2*(k1 + 2k2*r^2) [u v] (Eq 11 in paper)
+        """
+        
+        if wrt == "uv":  # (..., 2, 2)
+            # Derived by Wolfram
+            x = p2d[..., 0:1]  # (..., 1) or (B, N, 1)
+            y = p2d[..., 1:2]  # (..., 1) or (B, N, 1)
+            xy = x * y  # (..., 1) or (B, N, 1)
+            x2 = x**2  # (..., 1) or (B, N, 1)
+            y2 = y**2  # (..., 1) or (B, N, 1)
+            k1 = self.k1[..., None, None]  # (..., 1, 1) or (B, 1, 1)
+            k2 = self.k2[..., None, None]  # (..., 1, 1) or (B, 1, 1)
+            dxo_dx = 2 * (k1 + 2 * k2 * (3 * x2 + y2))  # (..., 1) or (B, N, 1)
+            dyo_dx = 8 * k2 * xy  # (..., 1) or (B, N, 1)
+            dxo_dy = dyo_dx   # (..., 1) or (B, N, 1)  Symmetrical
+            dyo_dy = 2 * (k1 + 2 * k2 * (x2 + 3 * y2))  # (..., 1) or (B, N, 1)
+
+            # Compose the Jacobian
+            J_x = torch.cat([dxo_dx, dyo_dx], -1)  # (..., 2) or (B, N, 2)
+            J_y = torch.cat([dxo_dy, dyo_dy], -1)  # (..., 2) or (B, N, 2)
+            J_xy = torch.stack([J_x, J_y], -1)  # (..., 2, 2) or (B, N, 2, 2)
+            return J_xy
+        elif wrt == "dist":
+            J_k1 = 2 * p2d  # (..., 2) or (B, N, 2)
+            r2 = torch.sum(p2d**2, -1, keepdim=True)  # (..., 1) or (B, N, 1)
+            J_k2 = 4 * r2 * p2d  # (..., 2) or (B, N, 2)
+            J_dist = torch.stack([J_k1, J_k2], -1)
+            return J_dist  # (..., 2, 2) or (B, N, 2, 2)
+        else:
+            return super().J_up_projection_offset(p2d, wrt)
+
+
 class SimpleDivisional(BaseCamera):
     """Implementation of the simple divisional camera model.
 
@@ -628,11 +848,19 @@ class SimpleDivisional(BaseCamera):
     The distortion model is (1 - sqrt(1 - 4 * k1 * r^2)) / (2 * k1 * r^2) where r^2 = x^2 + y^2.
     The undistortion model is 1 / (1 + k1 * r^2).
     """
+    @classmethod
+    def name(cls) -> str:
+        return "simple_divisional"
 
     @property
     def dist(self) -> torch.Tensor:
         """Distortion parameters, with shape (..., 1)."""
         return self._data[..., 6:]
+
+    @classmethod
+    def num_dist_params(cls) -> int:
+        """Number of distortion parameters."""
+        return 1
 
     @property
     def k1(self) -> torch.Tensor:
@@ -771,4 +999,5 @@ camera_models = {
     "pinhole": Pinhole,
     "simple_radial": SimpleRadial,
     "simple_divisional": SimpleDivisional,
+    "radial": Radial,
 }
