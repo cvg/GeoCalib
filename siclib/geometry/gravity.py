@@ -121,7 +121,11 @@ class Gravity(TensorWrapper):
 
     def J_update(self, spherical: bool = False) -> torch.Tensor:
         """Return the Jacobian of the update."""
-        return SphericalManifold if spherical else EuclideanManifold
+        return (
+            SphericalManifold.J_plus(self.vec3d)
+            if spherical
+            else EuclideanManifold.J_plus(self.vec3d)
+        )
 
     def __repr__(self):
         """Print the Camera object."""

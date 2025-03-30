@@ -2,7 +2,6 @@
 
 from abc import abstractmethod
 from typing import Dict, Optional, Tuple, Union
-import logging
 
 import torch
 from torch.func import jacfwd, vmap
@@ -35,7 +34,6 @@ class BaseCamera(TensorWrapper):
             data (torch.Tensor): Camera parameters with shape (..., {6, 7, 8}).
         """
         # w, h, fx, fy, cx, cy, dist
-        # TODO: suppport more dist params than k1, k2 in BaseCamera
         assert data.shape[-1] in {6, 7, 8}, data.shape
 
         pad = data.new_zeros(data.shape[:-1] + (8 - data.shape[-1],))
@@ -73,7 +71,12 @@ class BaseCamera(TensorWrapper):
             raise ValueError("Focal length or vertical field of view must be provided.")
 
         if "dist" in param_dict:
-            k1, k2 = param_dict["dist"][..., 0], param_dict["dist"][..., 1]
+            k1 = param_dict["dist"][..., (0,)]
+            k2 = (
+                param_dict["dist"][..., (1,)]
+                if param_dict["dist"].shape[-1] == 2
+                else torch.zeros_like(k1)
+            )
         elif "k1_hat" in param_dict:
             k1 = param_dict["k1_hat"] * (f / h) ** 2
 
@@ -519,6 +522,7 @@ class Pinhole(BaseCamera):
 
     Use this model for undistorted images.
     """
+
     @classmethod
     def name(cls) -> str:
         return "pinhole"
@@ -630,7 +634,7 @@ class SimpleRadial(BaseCamera):
         b1 = -self.k1[..., None, None]
         r2 = torch.sum(p2d**2, -1, keepdim=True)
         if wrt == "dist":
-            return -r2 * p2d
+            return (-r2 * p2d)[..., None]  # (..., 2, K)
         elif wrt == "pts":
             radial = 1 + b1 * r2
             radial_diag = torch.diag_embed(radial.expand(radial.shape[:-1] + (2,)))
@@ -644,7 +648,7 @@ class SimpleRadial(BaseCamera):
         if wrt == "uv":  # (..., 2, 2)
             return torch.diag_embed((2 * self.k1[..., None, None]).expand(p2d.shape[:-1] + (2,)))
         elif wrt == "dist":
-            return 2 * p2d  # (..., 2)
+            return (2 * p2d)[..., None]  # (..., 2)
         else:
             return super().J_up_projection_offset(p2d, wrt)
 
@@ -710,35 +714,15 @@ class Radial(BaseCamera):
         return p2d * radial, self.check_valid(p2d)
 
     def J_distort(self, p2d: torch.Tensor, wrt: str = "pts"):
-        """Jacobian of the distortion function.
-        d := the 'scale', 'radial'
-        d = 1 + k1 * r^2 + k2 * r^4
-          = 1 + k1 * (x^2 + y^2) + k2 * (x^2 + y^2)^2
-          = 1 + k1 * (x^2 + y^2) + k2 * (x^4 + 2 * x^2 * y^2 + y^4)
-        
-        dd/dx = 2 * k1 * x + 4 * k2 * x^3 + 2 * k2 * x * y^2
-        dd/dy = 2 * k1 * y + 4 * k2 * y^3 + 2 * k2 * x^2 * y
-
-        dd/dk1 = r^2
-        dd/dk2 = r^4
-        """
+        """Jacobian of the distortion function."""
         if wrt == "scale2dist":  # (..., 2)
-            r2 = torch.sum(p2d**2, -1, keepdim=True)  # (..., 1) or (B, N, 1)
-            r4 = r2**2 # (..., 1) or (B, N, 1)
-            return torch.cat([r2, r4], -1) # (..., 2) or (B, N, 2)
+            r2 = torch.sum(p2d**2, -1, keepdim=True)  # (..., 1)
+            r4 = r2**2  # (..., 1)
+            return torch.cat([r2, r4], -1)  # (..., 2)
         elif wrt == "scale2pts":  # (..., 2)
-            x = p2d[..., 0:1] # (..., 1) or (B, N, 1)
-            y = p2d[..., 1:2] # (..., 1) or (B, N, 1)
-            x2 = x**2 # (..., 1) or (B, N, 1)
-            y2 = y**2 # (..., 1) or (B, N, 1)
-            x3 = x**3 # (..., 1) or (B, N, 1)
-            y3 = y**3 # (..., 1) or (B, N, 1)
-            # Add 2 extra dimensions to k1, k2 to make then broadcastable with x, y
-            k1 = self.k1[..., None, None] # (..., 1, 1) or (B, 1, 1)
-            k2 = self.k2[..., None, None] # (..., 1, 1) or (B, 1, 1)
-            dd_dx = 2 * k1 * x + 4 * k2 * x3 + 2 * k2 * x * y2  # (..., 1) or (B, N, 1)
-            dd_dy = 2 * k1 * y + 4 * k2 * y3 + 2 * k2 * x2 * y  # (..., 1) or (B, N, 1)
-            return torch.cat([dd_dx, dd_dy], -1) # (..., 2) or (B, N, 2)
+            r2 = torch.sum(p2d**2, -1, keepdim=True)
+            k1, k2 = self.k1[..., None, None], self.k2[..., None, None]
+            return (2 * k1 + 4 * k2 * r2) * p2d  # (..., 2)
         else:
             return super().J_distort(p2d, wrt)
 
@@ -748,61 +732,33 @@ class Radial(BaseCamera):
         Undistort normalized 2D coordinates and check for validity of the distortion model.
         d = 1 - k1 * r^2 + (3 * k1^2 - k2) * r^4
         """
-        k1 = self.k1[..., None, None]  # (..., 1, 1) or (B, 1, 1)
-        k2 = self.k2[..., None, None]  # (..., 1, 1) or (B, 1, 1)
-        b1 = -k1  # (..., 1, 1) or (B, 1, 1)
-        b2 = 3 * k1**2 - k2  # (..., 1, 1) or (B, 1, 1)
-        r2 = torch.sum(p2d**2, -1, keepdim=True)  # (..., 1) or (B, N, 1)
-        radial = 1 + b1 * r2 + b2 * r2**2  # (..., 1) or (B, N, 1)
-        undistorted_p2d = p2d * radial  # (..., 2) or (B, N, 2)
-        return undistorted_p2d, self.check_valid(p2d)
+        r2 = torch.sum(p2d**2, -1, keepdim=True)
+        k1, k2 = self.k1[..., None, None], self.k2[..., None, None]
+        b1, b2 = -k1, 3 * k1**2 - k2
+        radial = 1 + b1 * r2 + b2 * r2**2
+        return p2d * radial, self.check_valid(p2d)
 
     @autocast
     def J_undistort(self, p2d: torch.Tensor, wrt: str = "pts") -> torch.Tensor:
         """Jacobian of the undistortion function."""
-        k1 = self.k1[..., None, None]  # (..., 1, 1) or (B, 1, 1)
-        k2 = self.k2[..., None, None]  # (..., 1, 1) or (B, 1, 1)
-        b1 = -k1  # (..., 1, 1) or (B, 1, 1)
-        b2 = 3 * k1**2 - k2  # (..., 1, 1) or (B, 1, 1)
-        r2 = torch.sum(p2d**2, -1, keepdim=True)  # (..., 1) or (B, N, 1)
-        r4 = r2**2  # (..., 1) or (B, N, 1)
+        r2 = torch.sum(p2d**2, -1, keepdim=True)
+        r4 = r2**2
+
+        k1, k2 = self.k1[..., None, None], self.k2[..., None, None]
 
         if wrt == "dist":
-            J_k1 = (-r2 + 6 * r4 * k1) * p2d  # (..., 2) or (B, N, 2)
-            J_k2 = -r4 * p2d  # (..., 2) or (B, N, 2)
-            J_dist = torch.stack([J_k1, J_k2], -1)  # (..., 2, 2) or (B, N, 2, 2)
-            return J_dist
-        elif wrt == "pts":
-            x = p2d[..., 0:1]  # (..., 1) or (B, N, 1)
-            y = p2d[..., 1:2]  # (..., 1) or (B, N, 1)
-            x2 = x**2  # (..., 1) or (B, N, 1)
-            y2 = y**2  # (..., 1) or (B, N, 1)
+            J_k1 = (6 * r4 * k1 - r2) * p2d
+            J_k2 = -r4 * p2d
+            return torch.stack([J_k1, J_k2], -1)
+        elif wrt == "pts":  # (..., 2, K)
+            b1, b2 = -k1, 3 * k1**2 - k2
 
-            # Hand derived
-            x3 = x**3  # (..., 1) or (B, N, 1)
-            y3 = y**3  # (..., 1) or (B, N, 1)
-            d = 1 + b1 * r2 + b2 * r4  # (..., 1) or (B, N, 1)
-            dd_dx = 2 * b1 * x + 4 * b2 * (x3 + x * y2)  # (..., 1) or (B, N, 1)
-            dd_dy = 2 * b1 * y + 4 * b2 * (y3 + y * x2)  # (..., 1) or (B, N, 1)
-            dxu_dx = d + x * dd_dx  # (..., 1) or (B, N, 1)
-            dyu_dx = y * dd_dx  # (..., 1) or (B, N, 1)
-            dxu_dy = x * dd_dy  # (..., 1) or (B, N, 1)
-            dyu_dy = d + y * dd_dy  # (..., 1) or (B, N, 1)
+            uv_uvT = torch.einsum("...i,...j->...ij", p2d, p2d)  # (..., 2, 2)
+            J = (4 * r2 * b2 + 2 * b1)[..., None] * uv_uvT
 
-            # # Derived by Wolfram
-            # x4 = x2**2  # (..., 1) or (B, N, 1)
-            # y4 = y2**2  # (..., 1) or (B, N, 1)
-            # xy = x * y  # (..., 1) or (B, N, 1)
-            # dxu_dx = b1 * (3 * x2 + y2) + b2 * (5 * x4 + 6 * x2 * y2 + y4) + 1  # (..., 1) or (B, N, 1)
-            # dyu_dx = 2 * xy * (b1 + 2 * b2 * r2)  # (..., 1) or (B, N, 1)
-            # dxu_dy = dyu_dx  # (..., 1) or (B, N, 1)
-            # dyu_dy = b1 * (x2 + 3 * y2) + b2 * (x4 + 6 * x2 * y2 + 5 * y4) + 1  # (..., 1) or (B, N, 1)
+            I = torch.eye(2, device=p2d.device, dtype=p2d.dtype).expand(p2d.shape[:-1] + (2, 2))
+            return J + (1 + b1 * r2 + b2 * r4)[..., None] * I
 
-            # Compose the Jacobian
-            J_x = torch.cat([dxu_dx, dyu_dx], -1)  # (..., 2) or (B, N, 2)
-            J_y = torch.cat([dxu_dy, dyu_dy], -1)  # (..., 2) or (B, N, 2)
-            J_xy = torch.stack([J_x, J_y], -1)  # (..., 2, 2) or (B, N, 2, 2)
-            return J_xy
         else:
             return super().J_undistort(p2d, wrt)
 
@@ -810,34 +766,17 @@ class Radial(BaseCamera):
         """Jacobian of the up-projection offset.
         up-projection offset := 2*(k1 + 2k2*r^2) [u v] (Eq 11 in paper)
         """
-        
-        if wrt == "uv":  # (..., 2, 2)
-            # Derived by Wolfram
-            x = p2d[..., 0:1]  # (..., 1) or (B, N, 1)
-            y = p2d[..., 1:2]  # (..., 1) or (B, N, 1)
-            xy = x * y  # (..., 1) or (B, N, 1)
-            x2 = x**2  # (..., 1) or (B, N, 1)
-            y2 = y**2  # (..., 1) or (B, N, 1)
-            k1 = self.k1[..., None, None]  # (..., 1, 1) or (B, 1, 1)
-            k2 = self.k2[..., None, None]  # (..., 1, 1) or (B, 1, 1)
-            dxo_dx = 2 * (k1 + 2 * k2 * (3 * x2 + y2))  # (..., 1) or (B, N, 1)
-            dyo_dx = 8 * k2 * xy  # (..., 1) or (B, N, 1)
-            dxo_dy = dyo_dx   # (..., 1) or (B, N, 1)  Symmetrical
-            dyo_dy = 2 * (k1 + 2 * k2 * (x2 + 3 * y2))  # (..., 1) or (B, N, 1)
+        r2 = torch.sum(p2d**2, -1, keepdim=True)
+        k1, k2 = self.k1[..., None, None], self.k2[..., None, None]
 
-            # Compose the Jacobian
-            J_x = torch.cat([dxo_dx, dyo_dx], -1)  # (..., 2) or (B, N, 2)
-            J_y = torch.cat([dxo_dy, dyo_dy], -1)  # (..., 2) or (B, N, 2)
-            J_xy = torch.stack([J_x, J_y], -1)  # (..., 2, 2) or (B, N, 2, 2)
-            return J_xy
+        if wrt == "uv":
+            uv_uvT = torch.einsum("...i,...j->...ij", p2d, p2d)  # (..., 2, 2)
+            I = torch.eye(2, device=p2d.device, dtype=p2d.dtype).expand(p2d.shape[:-1] + (2, 2))
+            return 8 * k2 * uv_uvT + (2 * k1 + 4 * k2 * r2)[..., None] * I
         elif wrt == "dist":
-            J_k1 = 2 * p2d  # (..., 2) or (B, N, 2)
-            r2 = torch.sum(p2d**2, -1, keepdim=True)  # (..., 1) or (B, N, 1)
-            J_k2 = 4 * r2 * p2d  # (..., 2) or (B, N, 2)
-            J_dist = torch.stack([J_k1, J_k2], -1)
-            return J_dist  # (..., 2, 2) or (B, N, 2, 2)
-        else:
-            return super().J_up_projection_offset(p2d, wrt)
+            return torch.stack([2 * p2d, 4 * r2 * p2d], -1)  # (..., 2, K)
+
+        return super().J_up_projection_offset(p2d, wrt)
 
 
 class SimpleDivisional(BaseCamera):
@@ -848,6 +787,7 @@ class SimpleDivisional(BaseCamera):
     The distortion model is (1 - sqrt(1 - 4 * k1 * r^2)) / (2 * k1 * r^2) where r^2 = x^2 + y^2.
     The undistortion model is 1 / (1 + k1 * r^2).
     """
+
     @classmethod
     def name(cls) -> str:
         return "simple_divisional"
@@ -927,7 +867,7 @@ class SimpleDivisional(BaseCamera):
         k1 = self.k1[..., None, None]
         if wrt == "dist":
             denom = (1 + k1 * r2) ** 2
-            return -r2 / denom.masked_fill(denom == 0, 1e6) * p2d
+            return (-r2 / denom.masked_fill(denom == 0, 1e6) * p2d)[..., None]  # (..., 2, K)
         elif wrt == "pts":
             t0 = 1 + k1 * r2
             t0 = t0.masked_fill(t0 == 0, 1e6)
@@ -961,7 +901,7 @@ class SimpleDivisional(BaseCamera):
             denom = denom.masked_fill(denom == 0, 1e6)
             J = J + (1 - t1) / denom
 
-            return J * p2d
+            return (J * p2d)[..., None]  # (..., 2, K)
         elif wrt == "uv":
             # ! unstable (gradient checker might fail), rewrite to use single division (by denom)
             ppT = torch.einsum("...i,...j->...ij", p2d, p2d)  # (..., 2, 2)
@@ -997,7 +937,7 @@ class SimpleDivisional(BaseCamera):
 
 camera_models = {
     "pinhole": Pinhole,
+    "radial": Radial,
     "simple_radial": SimpleRadial,
     "simple_divisional": SimpleDivisional,
-    "radial": Radial,
 }

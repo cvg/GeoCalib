@@ -216,7 +216,11 @@ class LMOptimizer(nn.Module):
             self.estimate_focal = False
             logger.debug("Using provided focal as prior.")
 
-        self.estimate_dist = self.camera_model.name() in ["radial", "simple_radial", "simple_divisional"]
+        self.estimate_dist = self.camera_model.name() in [
+            "radial",
+            "simple_radial",
+            "simple_divisional",
+        ]
         if "prior_dist" in data:
             self.estimate_dist = False
             logger.debug("Using provided distortion as prior.")
@@ -225,10 +229,15 @@ class LMOptimizer(nn.Module):
         self.focal_delta_dims = (
             (max(self.gravity_delta_dims) + 1,) if self.estimate_focal else (-1,)
         )
-        
+
         self.dist_delta_dims = None
         if self.estimate_dist:
-            self.dist_delta_dims = tuple(range(self.focal_delta_dims[-1] + 1, self.focal_delta_dims[-1] + 1 + self.camera_model.num_dist_params()))
+            self.dist_delta_dims = tuple(
+                range(
+                    self.focal_delta_dims[-1] + 1,
+                    self.focal_delta_dims[-1] + 1 + self.camera_model.num_dist_params(),
+                )
+            )
 
         logger.debug(f"Camera Model:         {self.camera_model}")
         logger.debug(f"Optimizing gravity:   {self.estimate_gravity} ({self.gravity_delta_dims})")
