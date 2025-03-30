@@ -111,7 +111,8 @@ model = torch.hub.load("cvg/GeoCalib", "GeoCalib", trust_repo=True)
 GeoCalib currently supports the following camera models via the `camera_model` parameter:
 1. `pinhole` (default) models only the focal lengths `fx` and `fy` but no lens distortion.
 2. `simple_radial` models weak distortions with a single polynomial distortion parameter `k1`.
-3. `simple_divisional` models strong fisheye distortions with a single distortion parameter `k1`, as proposed by Fitzgibbon in [_Simultaneous linear estimation of multiple view geometry and lens distortion_](https://www.robots.ox.ac.uk/~vgg/publications/2001/Fitzgibbon01b/fitzgibbon01b.pdf) (CVPR 2001).
+3. `radial` models stronger distortions with polynomial distortion parameters `k1`, `k2` (thanks to [RuibinMa #25](https://github.com/cvg/GeoCalib/pull/25)).
+4. `simple_divisional` models strong fisheye distortions with a single distortion parameter `k1`, as proposed by Fitzgibbon in [_Simultaneous linear estimation of multiple view geometry and lens distortion_](https://www.robots.ox.ac.uk/~vgg/publications/2001/Fitzgibbon01b/fitzgibbon01b.pdf) (CVPR 2001).
 
 The default model is optimized for pinhole images. To handle lens distortion, use the following:
 ```python

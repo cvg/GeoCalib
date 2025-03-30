@@ -139,7 +139,7 @@ class BaseModel(nn.Module, metaclass=MetaModel):
                 # print(f"Renaming {key} to {new_key}")
 
         dict_params = set(state_dict.keys())
-        model_params = set(map(lambda n: n[0], self.named_parameters()))
+        model_params = set(self.state_dict().keys())
 
         if dict_params == model_params:  # perfect fit
             logger.info("Loading all parameters of the checkpoint.")
