@@ -772,7 +772,7 @@ class Radial(BaseCamera):
         if wrt == "uv":
             uv_uvT = torch.einsum("...i,...j->...ij", p2d, p2d)  # (..., 2, 2)
             I = torch.eye(2, device=p2d.device, dtype=p2d.dtype).expand(p2d.shape[:-1] + (2, 2))
-            return 8 * k2 * uv_uvT + (2 * k1 + 4 * k2 * r2)[..., None] * I
+            return 8 * k2[..., None] * uv_uvT + (2 * k1 + 4 * k2 * r2)[..., None] * I
         elif wrt == "dist":
             return torch.stack([2 * p2d, 4 * r2 * p2d], -1)  # (..., 2, K)
 
