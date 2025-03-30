@@ -64,10 +64,15 @@ class BaseCamera(TensorWrapper):
         cx, cy = param_dict.get("cx", w / 2), param_dict.get("cy", h / 2)
 
         vfov = param_dict.get("vfov")
-        f = param_dict.get("f", fov2focal(vfov, h))
 
+        f = param_dict.get("f") if vfov is None else fov2focal(vfov, h)
         if "dist" in param_dict:
-            k1, k2 = param_dict["dist"][..., 0], param_dict["dist"][..., 1]
+            k1 = param_dict["dist"][..., (0,)]
+            k2 = (
+                param_dict["dist"][..., (1,)]
+                if param_dict["dist"].shape[-1] == 2
+                else torch.zeros_like(k1)
+            )
         elif "k1_hat" in param_dict:
             k1 = param_dict["k1_hat"] * (f / h) ** 2
 

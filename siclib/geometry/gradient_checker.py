@@ -20,9 +20,11 @@ from siclib.utils.conversions import deg2rad, fov2focal
 H, W = 320, 320
 
 K1 = -0.1
+K2 = 0.01
 
 # CAMERA_MODEL = "pinhole"
-CAMERA_MODEL = "simple_radial"
+# CAMERA_MODEL = "simple_radial"
+CAMERA_MODEL = "radial"
 # CAMERA_MODEL = "simple_divisional"
 
 Camera = camera_models[CAMERA_MODEL]
@@ -135,7 +137,7 @@ class TestJacobianFunctions(unittest.TestCase):
 
         rpf = get_toy_rpf()
         _, _, f = rpf.unbind(dim=-1)
-        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": [K1]})
+        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": [K1, K2]})
         uv = camera.normalize(camera.pixel_coordinates())
         J = camera.J_undistort(uv, "pts")
 
@@ -144,7 +146,6 @@ class TestJacobianFunctions(unittest.TestCase):
             return camera.undistort(pts)[0][0]
 
         J_auto = vmap(jacfwd(func_pts))(uv[0])[None].squeeze(-3)
-
         self.validate(J, J_auto)
 
     def test_undistort_k1(self):
@@ -154,16 +155,19 @@ class TestJacobianFunctions(unittest.TestCase):
 
         rpf = get_toy_rpf()
         _, _, f = rpf.unbind(dim=-1)
-        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": [K1]})
+        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": [K1, K2]})
         uv = camera.normalize(camera.pixel_coordinates())
         J = camera.J_undistort(uv, "dist")
 
         # auto jacobian
-        def func_k1(k1):
-            camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": k1})
+        def func_k1(dist):
+            camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": dist})
             return camera.undistort(uv)[0][0]
 
-        J_auto = vmap(jacfwd(func_k1))(camera.dist[..., :1]).squeeze(-1)
+        J_auto = vmap(jacfwd(func_k1))(camera.dist)
+
+        if CAMERA_MODEL != "radial":
+            J_auto = J_auto[..., :1]
 
         self.validate(J, J_auto)
 
@@ -175,7 +179,7 @@ class TestJacobianFunctions(unittest.TestCase):
         rpf = get_toy_rpf()
         # J = up_projection_offset(rpf)
         _, _, f = rpf.unbind(dim=-1)
-        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": [K1]})
+        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": [K1, K2]})
         uv = camera.normalize(camera.pixel_coordinates())
         J = camera.up_projection_offset(uv)
 
@@ -196,7 +200,7 @@ class TestJacobianFunctions(unittest.TestCase):
 
         rpf = get_toy_rpf()
         _, _, f = rpf.unbind(dim=-1)
-        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": [K1]})
+        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": [K1, K2]})
         uv = camera.normalize(camera.pixel_coordinates())
         J = camera.J_up_projection_offset(uv, "uv")
 
@@ -206,8 +210,6 @@ class TestJacobianFunctions(unittest.TestCase):
             return camera.up_projection_offset(uv)[0, 0]
 
         J_auto = vmap(jacfwd(projection_uv))(uv[0])[None]
-
-        # print(J.shape, J_auto.shape)
 
         self.validate(J, J_auto)
 
@@ -270,8 +272,13 @@ class TestEuclidean(unittest.TestCase):
 
     def local_pf_calc(self, rpfk: torch.Tensor):
         """Calculate the perspective field."""
-        r, p, f, k1 = rpfk.unbind(dim=-1)
-        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": k1})
+        r, p, f, k1 = rpfk[..., :4].unbind(dim=-1)
+        dist = torch.cat([k1, torch.zeros_like(k1)], dim=-1)
+        if CAMERA_MODEL == "radial":
+            rpfk = torch.cat([rpfk, torch.tensor([[K2]])], dim=-1)
+            r, p, f, k1, k2 = rpfk[..., :5].unbind(dim=-1)
+            dist = torch.cat([k1, k2], dim=-1)
+        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": dist})
         gravity = Gravity.from_rp(r, p)
         up, lat = get_perspective_field(camera, gravity)
         persp = torch.cat([up, torch.sin(lat)], dim=-3)
@@ -281,12 +288,17 @@ class TestEuclidean(unittest.TestCase):
         """Random rpf."""
         rpf = get_toy_rpf()
         rpfk = torch.cat([rpf, torch.tensor([[K1]])], dim=-1)
-        r, p, f, k1 = rpfk.unbind(dim=-1)
-        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": k1})
+        r, p, f, k1 = rpfk.unbind(-1)
+        dist = [k1, 0]
+        if CAMERA_MODEL == "radial":
+            rpfk = torch.cat([rpf, torch.tensor([[K1, K2]])], dim=-1)
+            r, p, f, k1, k2 = rpfk.unbind(-1)
+            dist = [k1, k2]
+        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": dist})
         gravity = Gravity.from_rp(r, p)
 
         J = torch.cat(J_perspective_field(camera, gravity, spherical=False), -2)
-        J_auto = jacfwd(self.local_pf_calc)(rpfk).squeeze(-2, -3).reshape(1, H, W, 3, 4)
+        J_auto = jacfwd(self.local_pf_calc)(rpfk).squeeze(-2, -3).reshape(J.shape)
 
         self.validate(J, J_auto)
 
@@ -294,12 +306,17 @@ class TestEuclidean(unittest.TestCase):
         """Roll = 0."""
         rpf = get_toy_rpf(roll=0)
         rpfk = torch.cat([rpf, torch.tensor([[K1]])], dim=-1)
-        r, p, f, k1 = rpfk.unbind(dim=-1)
-        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": k1})
+        r, p, f, k1 = rpfk.unbind(-1)
+        dist = [k1, 0]
+        if CAMERA_MODEL == "radial":
+            rpfk = torch.cat([rpf, torch.tensor([[K1, K2]])], dim=-1)
+            r, p, f, k1, k2 = rpfk.unbind(-1)
+            dist = [k1, k2]
+        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": dist})
         gravity = Gravity.from_rp(r, p)
 
         J = torch.cat(J_perspective_field(camera, gravity, spherical=False), -2)
-        J_auto = jacfwd(self.local_pf_calc)(rpfk).squeeze(-2, -3).reshape(1, H, W, 3, 4)
+        J_auto = jacfwd(self.local_pf_calc)(rpfk).squeeze(-2, -3).reshape(J.shape)
 
         self.validate(J, J_auto)
 
@@ -307,12 +324,17 @@ class TestEuclidean(unittest.TestCase):
         """Pitch = 0."""
         rpf = get_toy_rpf(pitch=0)
         rpfk = torch.cat([rpf, torch.tensor([[K1]])], dim=-1)
-        r, p, f, k1 = rpfk.unbind(dim=-1)
-        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": k1})
+        r, p, f, k1 = rpfk.unbind(-1)
+        dist = [k1, 0]
+        if CAMERA_MODEL == "radial":
+            rpfk = torch.cat([rpf, torch.tensor([[K1, K2]])], dim=-1)
+            r, p, f, k1, k2 = rpfk.unbind(-1)
+            dist = [k1, k2]
+        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": dist})
         gravity = Gravity.from_rp(r, p)
 
         J = torch.cat(J_perspective_field(camera, gravity, spherical=False), -2)
-        J_auto = jacfwd(self.local_pf_calc)(rpfk).squeeze(-2, -3).reshape(1, H, W, 3, 4)
+        J_auto = jacfwd(self.local_pf_calc)(rpfk).squeeze(-2, -3).reshape(J.shape)
 
         self.validate(J, J_auto)
 
@@ -321,12 +343,18 @@ class TestEuclidean(unittest.TestCase):
         for roll in [-45, 45]:
             rpf = get_toy_rpf(roll=roll)
             rpfk = torch.cat([rpf, torch.tensor([[K1]])], dim=-1)
-            r, p, f, k1 = rpfk.unbind(dim=-1)
-            camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": k1})
+            r, p, f, k1 = rpfk.unbind(-1)
+            dist = [k1, 0]
+            if CAMERA_MODEL == "radial":
+                rpfk = torch.cat([rpf, torch.tensor([[K1, K2]])], dim=-1)
+                r, p, f, k1, k2 = rpfk.unbind(-1)
+                dist = [k1, k2]
+            camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": dist})
             gravity = Gravity.from_rp(r, p)
 
             J = torch.cat(J_perspective_field(camera, gravity, spherical=False), -2)
-            J_auto = jacfwd(self.local_pf_calc)(rpfk).squeeze(-2, -3).reshape(1, H, W, 3, 4)
+
+            J_auto = jacfwd(self.local_pf_calc)(rpfk).squeeze(-2, -3).reshape(J.shape)
 
             self.validate(J, J_auto)
 
@@ -335,12 +363,17 @@ class TestEuclidean(unittest.TestCase):
         for pitch in [-45, 45]:
             rpf = get_toy_rpf(pitch=pitch)
             rpfk = torch.cat([rpf, torch.tensor([[K1]])], dim=-1)
-            r, p, f, k1 = rpfk.unbind(dim=-1)
-            camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": k1})
+            r, p, f, k1 = rpfk.unbind(-1)
+            dist = [k1, 0]
+            if CAMERA_MODEL == "radial":
+                rpfk = torch.cat([rpf, torch.tensor([[K1, K2]])], dim=-1)
+                r, p, f, k1, k2 = rpfk.unbind(-1)
+                dist = [k1, k2]
+            camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": dist})
             gravity = Gravity.from_rp(r, p)
 
             J = torch.cat(J_perspective_field(camera, gravity, spherical=False), -2)
-            J_auto = jacfwd(self.local_pf_calc)(rpfk).squeeze(-2, -3).reshape(1, H, W, 3, 4)
+            J_auto = jacfwd(self.local_pf_calc)(rpfk).squeeze(-2, -3).reshape(J.shape)
 
             self.validate(J, J_auto)
 
@@ -404,7 +437,12 @@ class TestSpherical(unittest.TestCase):
     def local_pf_calc(self, uvfk: torch.Tensor, gravity: Gravity):
         """Calculate the perspective field."""
         delta, f, k1 = uvfk[..., :2], uvfk[..., 2], uvfk[..., 3]
-        cam = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": k1})
+        dist = torch.cat([k1, torch.zeros_like(k1)], -1)
+        if CAMERA_MODEL == "radial":
+            k2 = uvfk[..., 4]
+            dist = torch.cat([k1, k2], -1)
+
+        cam = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": dist})
         up, lat = get_perspective_field(cam, gravity.update(delta, spherical=True))
         persp = torch.cat([up, torch.sin(lat)], dim=-3)
         return persp.permute(0, 2, 3, 1).reshape(1, -1, 3)
@@ -413,8 +451,13 @@ class TestSpherical(unittest.TestCase):
         """Test random rpf."""
         rpf = get_toy_rpf()
         rpfk = torch.cat([rpf, torch.tensor([[K1]])], dim=-1)
-        r, p, f, k1 = rpfk.unbind(dim=-1)
-        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": k1})
+        r, p, f, k1 = rpfk.unbind(-1)
+        dist = [k1, 0]
+        if CAMERA_MODEL == "radial":
+            rpfk = torch.cat([rpf, torch.tensor([[K1, K2]])], dim=-1)
+            r, p, f, k1, k2 = rpfk.unbind(-1)
+            dist = [k1, k2]
+        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": dist})
         gravity = Gravity.from_rp(r, p)
 
         J = torch.cat(J_perspective_field(camera, gravity, spherical=True), -2)
@@ -422,8 +465,10 @@ class TestSpherical(unittest.TestCase):
         uvfk = torch.zeros_like(rpfk)
         uvfk[..., 2] = f
         uvfk[..., 3] = k1
+        if CAMERA_MODEL == "radial":
+            uvfk[..., 4] = k2
         func = lambda uvfk: self.local_pf_calc(uvfk, gravity)
-        J_auto = jacfwd(func)(uvfk).squeeze(-2).reshape(1, H, W, 3, 4)
+        J_auto = jacfwd(func)(uvfk).squeeze(-2).reshape(J.shape)
 
         self.validate(J, J_auto)
 
@@ -431,8 +476,13 @@ class TestSpherical(unittest.TestCase):
         """Test roll = 0."""
         rpf = get_toy_rpf(roll=0)
         rpfk = torch.cat([rpf, torch.tensor([[K1]])], dim=-1)
-        r, p, f, k1 = rpfk.unbind(dim=-1)
-        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": k1})
+        r, p, f, k1 = rpfk.unbind(-1)
+        dist = [k1, 0]
+        if CAMERA_MODEL == "radial":
+            rpfk = torch.cat([rpf, torch.tensor([[K1, K2]])], dim=-1)
+            r, p, f, k1, k2 = rpfk.unbind(-1)
+            dist = [k1, k2]
+        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": dist})
         gravity = Gravity.from_rp(r, p)
 
         J = torch.cat(J_perspective_field(camera, gravity, spherical=True), -2)
@@ -440,8 +490,10 @@ class TestSpherical(unittest.TestCase):
         uvfk = torch.zeros_like(rpfk)
         uvfk[..., 2] = f
         uvfk[..., 3] = k1
+        if CAMERA_MODEL == "radial":
+            uvfk[..., 4] = k2
         func = lambda uvfk: self.local_pf_calc(uvfk, gravity)
-        J_auto = jacfwd(func)(uvfk).squeeze(-2).reshape(1, H, W, 3, 4)
+        J_auto = jacfwd(func)(uvfk).squeeze(-2).reshape(J.shape)
 
         self.validate(J, J_auto)
 
@@ -449,8 +501,13 @@ class TestSpherical(unittest.TestCase):
         """Test pitch = 0."""
         rpf = get_toy_rpf(pitch=0)
         rpfk = torch.cat([rpf, torch.tensor([[K1]])], dim=-1)
-        r, p, f, k1 = rpfk.unbind(dim=-1)
-        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": k1})
+        r, p, f, k1 = rpfk.unbind(-1)
+        dist = [k1, 0]
+        if CAMERA_MODEL == "radial":
+            rpfk = torch.cat([rpf, torch.tensor([[K1, K2]])], dim=-1)
+            r, p, f, k1, k2 = rpfk.unbind(-1)
+            dist = [k1, k2]
+        camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": dist})
         gravity = Gravity.from_rp(r, p)
 
         J = torch.cat(J_perspective_field(camera, gravity, spherical=True), -2)
@@ -458,8 +515,10 @@ class TestSpherical(unittest.TestCase):
         uvfk = torch.zeros_like(rpfk)
         uvfk[..., 2] = f
         uvfk[..., 3] = k1
+        if CAMERA_MODEL == "radial":
+            uvfk[..., 4] = k2
         func = lambda uvfk: self.local_pf_calc(uvfk, gravity)
-        J_auto = jacfwd(func)(uvfk).squeeze(-2).reshape(1, H, W, 3, 4)
+        J_auto = jacfwd(func)(uvfk).squeeze(-2).reshape(J.shape)
 
         self.validate(J, J_auto)
 
@@ -468,8 +527,13 @@ class TestSpherical(unittest.TestCase):
         for roll in [-45, 45]:
             rpf = get_toy_rpf(roll=roll)
             rpfk = torch.cat([rpf, torch.tensor([[K1]])], dim=-1)
-            r, p, f, k1 = rpfk.unbind(dim=-1)
-            camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": k1})
+            r, p, f, k1 = rpfk.unbind(-1)
+            dist = [k1, 0]
+            if CAMERA_MODEL == "radial":
+                rpfk = torch.cat([rpf, torch.tensor([[K1, K2]])], dim=-1)
+                r, p, f, k1, k2 = rpfk.unbind(-1)
+                dist = [k1, k2]
+            camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": dist})
             gravity = Gravity.from_rp(r, p)
 
             J = torch.cat(J_perspective_field(camera, gravity, spherical=True), -2)
@@ -477,8 +541,10 @@ class TestSpherical(unittest.TestCase):
             uvfk = torch.zeros_like(rpfk)
             uvfk[..., 2] = f
             uvfk[..., 3] = k1
+            if CAMERA_MODEL == "radial":
+                uvfk[..., 4] = k2
             func = lambda uvfk: self.local_pf_calc(uvfk, gravity)
-            J_auto = jacfwd(func)(uvfk).squeeze(-2).reshape(1, H, W, 3, 4)
+            J_auto = jacfwd(func)(uvfk).squeeze(-2).reshape(J.shape)
 
             self.validate(J, J_auto)
 
@@ -487,8 +553,14 @@ class TestSpherical(unittest.TestCase):
         for pitch in [-45, 45]:
             rpf = get_toy_rpf(pitch=pitch)
             rpfk = torch.cat([rpf, torch.tensor([[K1]])], dim=-1)
-            r, p, f, k1 = rpfk.unbind(dim=-1)
-            camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "k1": k1})
+            r, p, f, k1 = rpfk.unbind(-1)
+            dist = [k1, 0]
+            if CAMERA_MODEL == "radial":
+                rpfk = torch.cat([rpf, torch.tensor([[K1, K2]])], dim=-1)
+                r, p, f, k1, k2 = rpfk.unbind(-1)
+                dist = [k1, k2]
+
+            camera = Camera.from_dict({"height": [H], "width": [W], "f": f, "dist": dist})
             gravity = Gravity.from_rp(r, p)
 
             J = torch.cat(J_perspective_field(camera, gravity, spherical=True), -2)
@@ -496,8 +568,10 @@ class TestSpherical(unittest.TestCase):
             uvfk = torch.zeros_like(rpfk)
             uvfk[..., 2] = f
             uvfk[..., 3] = k1
+            if CAMERA_MODEL == "radial":
+                uvfk[..., 4] = k2
             func = lambda uvfk: self.local_pf_calc(uvfk, gravity)
-            J_auto = jacfwd(func)(uvfk).squeeze(-2).reshape(1, H, W, 3, 4)
+            J_auto = jacfwd(func)(uvfk).squeeze(-2).reshape(J.shape)
 
             self.validate(J, J_auto)
 
