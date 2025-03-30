@@ -101,11 +101,6 @@ class LMOptimizer(BaseModel):
             data = {}
         self.shared_intrinsics = shared_intrinsics
 
-        if shared_intrinsics:  # si => must use pinhole
-            assert (
-                self.camera_model == camera_models["pinhole"]
-            ), f"Shared intrinsics only supported with pinhole camera model: {self.camera_model}"
-
         self.estimate_gravity = True
         if "prior_gravity" in data:
             self.estimate_gravity = False
@@ -138,6 +133,10 @@ class LMOptimizer(BaseModel):
                     self.focal_delta_dims[-1] + 1 + self.camera_model.num_dist_params(),
                 )
             )
+
+        self.n_intrinsic_params = self.estimate_focal + (
+            self.camera_model.num_dist_params() if self.camera_has_distortion else 0
+        )
 
         logger.debug(f"Camera Model:         {self.camera_model}")
         logger.debug(f"Optimizing gravity:   {self.estimate_gravity} ({self.gravity_delta_dims})")
@@ -256,23 +255,35 @@ class LMOptimizer(BaseModel):
             # reshape to (1, B * (N_params-1) + 1)
             Grad_g = Grad[..., :2].reshape(1, -1)
             Grad_f = Grad[..., 2].reshape(1, -1).sum(-1, keepdim=True)
-            Grad = torch.cat([Grad_g, Grad_f], dim=-1)
+            Grad_dist = Grad[..., 3:].sum(-2).reshape(1, -1)
+            Grad = torch.cat([Grad_g, Grad_f, Grad_dist], dim=-1)
 
         Hess = torch.einsum("...Njk,...Njl->...Nkl", J, J)
         Hess = weights[..., None, None] * Hess
         Hess = Hess.sum(-3)
 
         if shared_intrinsics:
+            """
+            Hess =
+            [
+                diag(H_G )       J_g_intrinsic
+
+                J_g_intrinsic^T  H_intrinsic
+            ]
+            """
+            B = Hess.shape[0]
             H_g = torch.block_diag(*list(Hess[..., :2, :2]))
-            J_fg = Hess[..., :2, 2].flatten()
-            J_gf = Hess[..., 2, :2].flatten()
-            J_f = Hess[..., 2, 2].sum()
-            dims = H_g.shape[-1] + 1
+            J_intrinsics_g = Hess[..., :2, 2:].reshape(B * 2, -1)
+            J_g_intrinsics = Hess[..., 2:, :2].permute(0, 2, 1).reshape(B * 2, -1).T
+
+            H_intrinsics = Hess[..., 2:, 2:].sum(-3)
+
+            dims = H_g.shape[-1] + self.n_intrinsic_params
             Hess = Hess.new_zeros((dims, dims), dtype=torch.float32)
-            Hess[:-1, :-1] = H_g
-            Hess[-1, :-1] = J_gf
-            Hess[:-1, -1] = J_fg
-            Hess[-1, -1] = J_f
+            Hess[: -self.n_intrinsic_params, : -self.n_intrinsic_params] = H_g
+            Hess[-self.n_intrinsic_params :, : -self.n_intrinsic_params] = J_g_intrinsics
+            Hess[: -self.n_intrinsic_params, -self.n_intrinsic_params :] = J_intrinsics_g
+            Hess[-self.n_intrinsic_params :, -self.n_intrinsic_params :] = H_intrinsics
             Hess = Hess.unsqueeze(0)
 
         return Grad, Hess
@@ -320,7 +331,9 @@ class LMOptimizer(BaseModel):
         Hess = J_up.new_zeros(J_up.shape[0], n_params, n_params)
 
         if shared_intrinsics:
-            N_params = Grad.shape[0] * (n_params - 1) + 1
+            N_params = (
+                Grad.shape[0] * (n_params - self.n_intrinsic_params) + self.n_intrinsic_params
+            )
             Grad = Grad.new_zeros(1, N_params)
             Hess = Hess.new_zeros(1, N_params, N_params)
 
@@ -488,9 +501,10 @@ class LMOptimizer(BaseModel):
             delta = optimizer_step(Grad, Hess, lamb)  # (B, N_params)
 
             if self.shared_intrinsics:
-                delta_g = delta[..., :-1].reshape(B, 2)
-                delta_f = delta[..., -1].expand(B, 1)
-                delta = torch.cat([delta_g, delta_f], dim=-1)
+                delta_g = delta[..., : -self.n_intrinsic_params].reshape(B, 2)
+                delta_f = delta[..., -self.n_intrinsic_params].expand(B, 1)
+                delta_dist = delta[..., -self.n_intrinsic_params + 1 :].expand(B, -1)
+                delta = torch.cat([delta_g, delta_f, delta_dist], dim=-1)
 
             # calculate new cost
             camera_opt, gravity_opt = self.update_estimate(camera_opt, gravity_opt, delta)
