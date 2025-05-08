@@ -474,8 +474,10 @@ class BaseCamera(TensorWrapper):
                 scale = torch.pi / float(vfov) * float(h) / pano_img.shape[-2] * resize_factor[i]
                 pano_shape = (int(pano_img.shape[-2] * scale), int(pano_img.shape[-1] * scale))
 
-                mode = "bilinear" if scale >= 1 else "area"
+                mode = "bicubic" if scale >= 1 else "area"
                 resized_pano = F.interpolate(pano_img, size=pano_shape, mode=mode)
+                # clamp as bicubic interpolation can over- or under-shoot
+                resized_pano = resized_pano.clamp(pano_img.min(), pano_img.max())
             else:
                 # make sure to copy: resized_pano = pano_img
                 resized_pano = pano_img
