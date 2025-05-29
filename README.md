@@ -517,7 +517,8 @@ We provide a script to download the PolyHaven and HDRMAPS panos. The script will
 ```bash
 python -m siclib.datasets.utils.download_openpano --name openpano --laval_dir data/laval-tonemap
 ```
-Alternatively, you can download the PolyHaven and HDRMAPS panos from [here](https://cvg-data.inf.ethz.ch/GeoCalib_ECCV2024/).
+Alternatively, you can download the PolyHaven and HDRMAPS panos from [here](https://polybox.ethz.ch/index.php/s/XK4oM1l6ZqSIXw9).
+<!-- Alternatively, you can download the PolyHaven and HDRMAPS panos from [here](https://cvg-data.inf.ethz.ch/GeoCalib_ECCV2024/). -->
 
 
 After downloading the panoramas, you can create the training set by running the following command:
@@ -614,7 +615,19 @@ the flag ```data=openpano``` to the command to train on the pinhole images.
 <details>
 <summary>[Training Perspective Fields]</summary>
 
-Coming soon!
+To train Perspective Fields, first setup the files following the instructions in the [ParamNet-siclib](https://github.com/veichta/ParamNet-siclib) repository. Then run:
+
+First train the perspective network:
+
+```bash
+python -m siclib.train perspective-net --conf perspective-net --distributed
+```
+
+Then put the trained weights in the ```weights/persnet-pano-old.tar``` file and train the full model:
+
+```bash
+python -m siclib.train param-net --conf param-net --distributed
+```
 
 </details>
 

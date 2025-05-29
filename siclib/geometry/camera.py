@@ -84,6 +84,11 @@ class SimpleRadial(BaseCamera):
         """Distortion parameters, with shape (...)."""
         return self._data[..., 6]
 
+    @property
+    def k1_hat(self) -> torch.Tensor:
+        """Distortion parameters, with shape (...)."""
+        return self.k1 / (self.f[..., 1] / self.size[..., 1]) ** 2
+
     def update_dist(self, delta: torch.Tensor, dist_range: Tuple[float, float] = (-0.7, 0.7)):
         """Update the self parameters after changing the k1 distortion parameter."""
         delta_dist = self.new_ones(self.dist.shape) * delta

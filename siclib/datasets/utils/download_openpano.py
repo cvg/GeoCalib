@@ -9,7 +9,8 @@ from tqdm import tqdm
 
 from siclib import logger
 
-PANO_URL = "https://cvg-data.inf.ethz.ch/GeoCalib_ECCV2024/openpano.zip"
+PANO_URL = "https://polybox.ethz.ch/index.php/s/XK4oM1l6ZqSIXw9/download"
+# PANO_URL = "https://cvg-data.inf.ethz.ch/GeoCalib_ECCV2024/openpano.zip"
 
 
 def download_and_extract_dataset(name: str, url: Path, output: Path) -> None:
