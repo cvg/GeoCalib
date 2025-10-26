@@ -50,6 +50,7 @@ python -m pip install -e "git+https://github.com/cvg/GeoCalib#egg=geocalib"
 Here is a minimal usage example:
 
 ```python
+import torch
 from geocalib import GeoCalib
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
