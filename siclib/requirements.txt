@@ -5,7 +5,7 @@ kornia
 matplotlib
 
 omegaconf
-albumentations
+albumentations>=1.4,<2
 h5py
 hydra-core
 pandas
