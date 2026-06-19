@@ -112,7 +112,7 @@ class GeoCalib(nn.Module):
 
         out |= {
             k: data[k]
-            for k in ["image", "scales", "prior_gravity", "prior_focal", "prior_dist"]
+            for k in ["image", "scales", "prior_gravity", "prior_focal", "prior_dist", "camera_R_rig"]
             if k in data
         }
 

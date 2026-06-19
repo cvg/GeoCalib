@@ -137,6 +137,96 @@ def optimizer_step(
     return delta.to(H.device)
 
 
+def setup_system_rig_unshared_intrinsics(
+    Grad: torch.Tensor, Hess: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    B = Hess.shape[0]
+    N_int = Hess.shape[-1] - 2  # number of intrinsic parameters
+
+    H_g = Hess[..., :2, :2].sum(0)  # (2, 2)
+    H_int = Hess[..., 2:, 2:]       # (B, N_int, N_int)
+    J_int_g = Hess[..., 2:, :2]     # (B, N_int, 2)
+    J_g_int = Hess[..., :2, 2:]     # (B, 2, N_int)
+
+    total_dims = B * N_int + 2
+    H_joint = Hess.new_zeros((total_dims, total_dims), dtype=torch.float32)
+
+    # Fill diagonal blocks
+    for i in range(B):
+        start = i * N_int
+        end = start + N_int
+        H_joint[start:end, start:end] = H_int[i]
+        H_joint[start:end, -2:] = J_int_g[i]
+        H_joint[-2:, start:end] = J_g_int[i]
+
+    H_joint[-2:, -2:] = H_g
+    Hess = H_joint.unsqueeze(0)
+
+    # Gradients
+    Grad_g = Grad[..., :2].sum(0, keepdim=True)  # (1, 2)
+    Grad_int = Grad[..., 2:].reshape(1, -1)     # (1, B * N_int)
+    Grad = torch.cat([Grad_int, Grad_g], dim=-1) # (1, B * N_int + 2)
+    return Grad, Hess
+
+
+def setup_system_shared_intrinsics(
+    Grad: torch.Tensor, Hess: torch.Tensor, n_intrinsic_params: int
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    Grad_g = Grad[..., :2].reshape(1, -1)
+    Grad_f = Grad[..., 2].reshape(1, -1).sum(-1, keepdim=True)
+    Grad_dist = Grad[..., 3:].sum(-2).reshape(1, -1)
+    Grad = torch.cat([Grad_g, Grad_f, Grad_dist], dim=-1)
+
+    """
+    Hess =
+    [
+        diag(H_G )       J_g_intrinsic
+
+        J_g_intrinsic^T  H_intrinsic
+    ]
+    """
+    B = Hess.shape[0]
+    H_g = torch.block_diag(*list(Hess[..., :2, :2]))
+    J_intrinsics_g = Hess[..., :2, 2:].reshape(B * 2, -1)
+    J_g_intrinsics = Hess[..., 2:, :2].permute(0, 2, 1).reshape(B * 2, -1).T
+
+    H_intrinsics = Hess[..., 2:, 2:].sum(-3)
+
+    dims = H_g.shape[-1] + n_intrinsic_params
+    Hess = Hess.new_zeros((dims, dims), dtype=torch.float32)
+    Hess[: -n_intrinsic_params, : -n_intrinsic_params] = H_g
+    Hess[-n_intrinsic_params :, : -n_intrinsic_params] = J_g_intrinsics
+    Hess[: -n_intrinsic_params, -n_intrinsic_params :] = J_intrinsics_g
+    Hess[-n_intrinsic_params :, -n_intrinsic_params :] = H_intrinsics
+    Hess = Hess.unsqueeze(0)
+    return Grad, Hess
+
+
+def get_gravity_uncertainty(
+    delta_uncertainty: torch.Tensor, B: int, device: torch.device
+) -> torch.Tensor:
+    try:
+        eigenvalues = torch.linalg.eigvalsh(delta_uncertainty.cpu())
+        return torch.max(eigenvalues, dim=-1).values.to(device).expand(B)
+    except RuntimeError:
+        logger.warning("Could not calculate gravity uncertainty")
+        return delta_uncertainty.new_zeros(B)
+
+
+def initialize_gravity_rig(gravity_init: Gravity, camera_R_rig: torch.Tensor) -> Gravity:
+    # Initialize rig gravity by averaging the gravity vectors rotated from each camera frame to the rig frame
+    g_cam = gravity_init.vec3d  # (B, 3)
+    # Rotate each camera's gravity to the rig frame: g_rig_i = R_i^T * g_i
+    g_rig_samples = torch.einsum("bij,bi->bj", camera_R_rig.permute(0, 2, 1), g_cam)
+    g_rig_avg = g_rig_samples.mean(dim=0)
+    g_rig_avg = torch.nn.functional.normalize(g_rig_avg, dim=-1)
+    gravity_init_rig = Gravity(g_rig_avg)
+    
+    # Recompute the batch of camera gravities from the rig-frame gravity
+    gravity_init_vec = torch.einsum("bij,j->bi", camera_R_rig, gravity_init_rig.vec3d)
+    return Gravity(gravity_init_vec)
+
+
 # mypy: ignore-errors
 class LMOptimizer(nn.Module):
     """Levenberg-Marquardt optimizer for camera calibration."""
@@ -320,6 +410,7 @@ class LMOptimizer(nn.Module):
         residuals: torch.Tensor,
         weights: torch.Tensor,
         shared_intrinsics: bool,
+        camera_R_rig: torch.Tensor = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Calculate the gradient and Hessian for given the Jacobian, residuals, and weights.
 
@@ -328,6 +419,7 @@ class LMOptimizer(nn.Module):
             residuals (torch.Tensor): Residuals.
             weights (torch.Tensor): Weights.
             shared_intrinsics (bool): Whether to share the intrinsics across the batch.
+            camera_R_rig (torch.Tensor, optional): Rigid rotations from rig to cameras. Defaults to None.
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: Gradient and Hessian.
@@ -347,40 +439,19 @@ class LMOptimizer(nn.Module):
         Grad = weights[..., None] * Grad
         Grad = Grad.sum(-2)  # (B, N_params)
 
-        if shared_intrinsics:
-            # reshape to (1, B * (N_params-1) + 1)
-            Grad_g = Grad[..., :2].reshape(1, -1)
-            Grad_f = Grad[..., 2].reshape(1, -1).sum(-1, keepdim=True)
-            Grad_dist = Grad[..., 3:].sum(-2).reshape(1, -1)
-            Grad = torch.cat([Grad_g, Grad_f, Grad_dist], dim=-1)
-
         Hess = torch.einsum("...Njk,...Njl->...Nkl", J, J)
         Hess = weights[..., None, None] * Hess
         Hess = Hess.sum(-3)
 
-        if shared_intrinsics:
-            """
-            Hess =
-            [
-                diag(H_G )       J_g_intrinsic
-
-                J_g_intrinsic^T  H_intrinsic
-            ]
-            """
-            B = Hess.shape[0]
-            H_g = torch.block_diag(*list(Hess[..., :2, :2]))
-            J_intrinsics_g = Hess[..., :2, 2:].reshape(B * 2, -1)
-            J_g_intrinsics = Hess[..., 2:, :2].permute(0, 2, 1).reshape(B * 2, -1).T
-
-            H_intrinsics = Hess[..., 2:, 2:].sum(-3)
-
-            dims = H_g.shape[-1] + self.n_intrinsic_params
-            Hess = Hess.new_zeros((dims, dims), dtype=torch.float32)
-            Hess[: -self.n_intrinsic_params, : -self.n_intrinsic_params] = H_g
-            Hess[-self.n_intrinsic_params :, : -self.n_intrinsic_params] = J_g_intrinsics
-            Hess[: -self.n_intrinsic_params, -self.n_intrinsic_params :] = J_intrinsics_g
-            Hess[-self.n_intrinsic_params :, -self.n_intrinsic_params :] = H_intrinsics
-            Hess = Hess.unsqueeze(0)
+        if camera_R_rig is not None:
+            if shared_intrinsics:
+                # All parameters are shared
+                Grad = Grad.sum(0, keepdim=True)  # (1, N_params)
+                Hess = Hess.sum(0, keepdim=True)  # (1, N_params, N_params)
+            else:
+                Grad, Hess = setup_system_rig_unshared_intrinsics(Grad, Hess)
+        elif shared_intrinsics:
+            Grad, Hess = setup_system_shared_intrinsics(Grad, Hess, self.n_intrinsic_params)
 
         return Grad, Hess
 
@@ -392,6 +463,7 @@ class LMOptimizer(nn.Module):
         weights: Dict[str, torch.Tensor],
         as_rpf: bool = False,
         shared_intrinsics: bool = False,
+        camera_R_rig: torch.Tensor = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Calculate the gradient and Hessian for the optimization.
 
@@ -404,6 +476,7 @@ class LMOptimizer(nn.Module):
             roll, pitch, and focal length. Defaults to False.
             shared_intrinsics (bool, optional): Whether to share the intrinsics across the batch.
             Defaults to False.
+            camera_R_rig (torch.Tensor, optional): Rigid rotations from rig to cameras. Defaults to None.
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: Gradient and Hessian for the optimization.
@@ -413,29 +486,38 @@ class LMOptimizer(nn.Module):
             gravity,
             spherical=self.conf.use_spherical_manifold and not as_rpf,
             log_focal=self.conf.use_log_focal and not as_rpf,
+            camera_R_rig=camera_R_rig,
         )
 
         J_up = J_up.reshape(J_up.shape[0], -1, J_up.shape[-2], J_up.shape[-1])  # (B, N, 2, 3)
         J_lat = J_lat.reshape(J_lat.shape[0], -1, J_lat.shape[-2], J_lat.shape[-1])  # (B, N, 1, 3)
 
-        n_params = (
+        B = J_up.shape[0]
+        n_params_base = (
             2 * self.estimate_gravity
             + self.estimate_focal
             + (self.camera_model.num_dist_params() if self.camera_has_distortion else 0)
         )
-        Grad = J_up.new_zeros(J_up.shape[0], n_params)
-        Hess = J_up.new_zeros(J_up.shape[0], n_params, n_params)
+        
+        if camera_R_rig is not None:
+            if shared_intrinsics:
+                dims = (1, n_params_base)
+            else:
+                N_params = B * (n_params_base - 2) + 2
+                dims = (1, N_params)
+        elif shared_intrinsics:
+            N_params = B * (n_params_base - self.n_intrinsic_params) + self.n_intrinsic_params
+            dims = (1, N_params)
+        else:
+            dims = (B, n_params_base)
+            
+        Grad = J_up.new_zeros(*dims)
+        Hess = J_up.new_zeros(dims[0], dims[1], dims[1])
 
-        if shared_intrinsics:
-            N_params = (
-                Grad.shape[0] * (n_params - self.n_intrinsic_params) + self.n_intrinsic_params
-            )
-            Grad = Grad.new_zeros(1, N_params)
-            Hess = Hess.new_zeros(1, N_params, N_params)
 
         if "up_residual" in residuals:
             Up_Grad, Up_Hess = self.calculate_gradient_and_hessian(
-                J_up, residuals["up_residual"], weights["up_weights"], shared_intrinsics
+                J_up, residuals["up_residual"], weights["up_weights"], shared_intrinsics, camera_R_rig
             )
 
             if self.conf.verbose:
@@ -450,6 +532,7 @@ class LMOptimizer(nn.Module):
                 residuals["latitude_residual"],
                 weights["latitude_weights"],
                 shared_intrinsics,
+                camera_R_rig,
             )
 
             if self.conf.verbose:
@@ -460,12 +543,14 @@ class LMOptimizer(nn.Module):
 
         return Grad, Hess
 
+
     def estimate_uncertainty(
         self,
         camera_opt: BaseCamera,
         gravity_opt: Gravity,
         errors: Dict[str, torch.Tensor],
         weights: Dict[str, torch.Tensor],
+        camera_R_rig: torch.Tensor = None,
     ) -> Dict[str, torch.Tensor]:
         """Estimate the uncertainty of the optimized camera and gravity at the final step.
 
@@ -474,49 +559,86 @@ class LMOptimizer(nn.Module):
             gravity_opt (Gravity): Final optimized gravity.
             errors (Dict[str, torch.Tensor]): Costs for the optimization.
             weights (Dict[str, torch.Tensor]): Weights for the optimization.
+            camera_R_rig (torch.Tensor, optional): Rigid rotations from rig to cameras. Defaults to None.
 
         Returns:
             Dict[str, torch.Tensor]: Uncertainty estimates for the optimized camera and gravity.
         """
         _, Hess = self.setup_system(
-            camera_opt, gravity_opt, errors, weights, as_rpf=True, shared_intrinsics=False
+            camera_opt,
+            gravity_opt,
+            errors,
+            weights,
+            as_rpf=True,
+            shared_intrinsics=self.shared_intrinsics,
+            camera_R_rig=camera_R_rig,
         )
         Cov = torch.inverse(Hess)
 
-        roll_uncertainty = Cov.new_zeros(Cov[..., 0, 0].shape)
-        pitch_uncertainty = Cov.new_zeros(Cov[..., 0, 0].shape)
-        gravity_uncertainty = Cov.new_zeros(Cov[..., 0, 0].shape)
-        if self.estimate_gravity:
-            roll_uncertainty = Cov[..., 0, 0]
-            pitch_uncertainty = Cov[..., 1, 1]
+        B = camera_opt.shape[0]
 
-            try:
-                delta_uncertainty = Cov[..., :2, :2]
-                eigenvalues = torch.linalg.eigvalsh(delta_uncertainty.cpu())
-                gravity_uncertainty = torch.max(eigenvalues, dim=-1).values.to(Cov.device)
-            except RuntimeError:
-                logger.warning("Could not calculate gravity uncertainty")
-                gravity_uncertainty = Cov.new_zeros(Cov.shape[0])
+        roll_var = Cov.new_zeros(B)
+        pitch_var = Cov.new_zeros(B)
+        gravity_var = Cov.new_zeros(B)
+        focal_var = Cov.new_zeros(B)
+        fov_var = Cov.new_zeros(B)
 
-        focal_uncertainty = Cov.new_zeros(Cov[..., 0, 0].shape)
-        fov_uncertainty = Cov.new_zeros(Cov[..., 0, 0].shape)
-        if self.estimate_focal:
-            focal_uncertainty = Cov[..., self.focal_delta_dims[0], self.focal_delta_dims[0]]
-            fov_uncertainty = (
-                J_focal2fov(camera_opt.f[..., 1], camera_opt.size[..., 1]) ** 2 * focal_uncertainty
-            )
+        if camera_R_rig is not None:
+            if self.shared_intrinsics:
+                # All parameters are shared.
+                roll_var = Cov[..., 0, 0].expand(B)
+                pitch_var = Cov[..., 1, 1].expand(B)
+
+                gravity_var = get_gravity_uncertainty(Cov[..., :2, :2], B, Cov.device)
+
+                if self.estimate_focal:
+                    focal_var = Cov[..., 2, 2].expand(B)
+                    fov_var = (
+                        J_focal2fov(camera_opt.f[..., 1], camera_opt.size[..., 1]) ** 2 * Cov[..., 2, 2]
+                    )
+            else:
+                # Gravity is shared, intrinsics are not.
+                roll_var = Cov[..., -2, -2].expand(B)
+                pitch_var = Cov[..., -1, -1].expand(B)
+
+                gravity_var = get_gravity_uncertainty(Cov[..., -2:, -2:], B, Cov.device)
+
+                if self.estimate_focal:
+                    N_int = self.n_intrinsic_params
+                    for i in range(B):
+                        idx = i * N_int
+                        focal_var[i] = Cov[..., idx, idx]
+                        fov_var[i] = (
+                            J_focal2fov(camera_opt.f[i, 1], camera_opt.size[i, 1]) ** 2 * Cov[..., idx, idx]
+                        )
+        else:
+            if self.estimate_gravity:
+                roll_var = Cov[..., 0, 0]
+                pitch_var = Cov[..., 1, 1]
+
+                gravity_var = get_gravity_uncertainty(Cov[..., :2, :2], B, Cov.device)
+
+            if self.estimate_focal:
+                focal_var = Cov[..., self.focal_delta_dims[0], self.focal_delta_dims[0]]
+                fov_var = (
+                    J_focal2fov(camera_opt.f[..., 1], camera_opt.size[..., 1]) ** 2 * focal_var
+                )
 
         return {
             "covariance": Cov,
-            "roll_uncertainty": torch.sqrt(roll_uncertainty),
-            "pitch_uncertainty": torch.sqrt(pitch_uncertainty),
-            "gravity_uncertainty": torch.sqrt(gravity_uncertainty),
-            "focal_uncertainty": torch.sqrt(focal_uncertainty) / 2,
-            "vfov_uncertainty": torch.sqrt(fov_uncertainty / 2),
+            "roll_uncertainty": torch.sqrt(roll_var),
+            "pitch_uncertainty": torch.sqrt(pitch_var),
+            "gravity_uncertainty": torch.sqrt(gravity_var),
+            "focal_uncertainty": torch.sqrt(focal_var) / 2,
+            "vfov_uncertainty": torch.sqrt(fov_var / 2),
         }
 
     def update_estimate(
-        self, camera: BaseCamera, gravity: Gravity, delta: torch.Tensor
+        self,
+        camera: BaseCamera,
+        gravity: Gravity,
+        delta: torch.Tensor,
+        camera_R_rig: torch.Tensor = None,
     ) -> Tuple[BaseCamera, Gravity]:
         """Update the camera and gravity estimates with the given delta.
 
@@ -524,16 +646,35 @@ class LMOptimizer(nn.Module):
             camera (BaseCamera): Optimized camera.
             gravity (Gravity): Optimized gravity.
             delta (torch.Tensor): Delta to update the camera and gravity estimates.
+            camera_R_rig (torch.Tensor, optional): Rigid rotations from rig to cameras. Defaults to None.
 
         Returns:
             Tuple[BaseCamera, Gravity]: Updated camera and gravity estimates.
         """
-        delta_gravity = (
-            delta[..., self.gravity_delta_dims]
-            if self.estimate_gravity
-            else delta.new_zeros(delta.shape[:-1] + (2,))
-        )
-        new_gravity = gravity.update(delta_gravity, spherical=self.conf.use_spherical_manifold)
+        B = camera.shape[0]
+        if camera_R_rig is not None:
+            if not self.shared_intrinsics:
+                N_int = self.n_intrinsic_params
+                delta_int = delta[..., :-2].reshape(B, N_int)
+                delta_gravity = delta[..., -2:]
+                # Reconstruct full delta of shape (B, N_params)
+                delta = torch.cat([delta_gravity.expand(B, -1), delta_int], dim=-1)
+            else:
+                delta_gravity = delta[..., :2]
+        else:
+            delta_gravity = (
+                delta[..., self.gravity_delta_dims]
+                if self.estimate_gravity
+                else delta.new_zeros(delta.shape[:-1] + (2,))
+            )
+
+        if camera_R_rig is not None:
+            g_rig = gravity[0:1]
+            new_g_rig = g_rig.update(delta_gravity, spherical=self.conf.use_spherical_manifold)
+            new_gravity_vec = torch.einsum("bij,j->bi", camera_R_rig, new_g_rig.vec3d[0])
+            new_gravity = Gravity(new_gravity_vec)
+        else:
+            new_gravity = gravity.update(delta_gravity, spherical=self.conf.use_spherical_manifold)
 
         delta_f = (
             delta[..., self.focal_delta_dims]
@@ -553,6 +694,7 @@ class LMOptimizer(nn.Module):
         data: Dict[str, torch.Tensor],
         camera_opt: BaseCamera,
         gravity_opt: Gravity,
+        camera_R_rig: torch.Tensor = None,
     ) -> Tuple[BaseCamera, Gravity, Dict[str, torch.Tensor]]:
         """Optimize the camera and gravity estimates.
 
@@ -560,6 +702,7 @@ class LMOptimizer(nn.Module):
             data (Dict[str, torch.Tensor]): Input data.
             camera_opt (BaseCamera): Optimized camera.
             gravity_opt (Gravity): Optimized gravity.
+            camera_R_rig (torch.Tensor, optional): Rigid rotations from rig to cameras. Defaults to None.
 
         Returns:
             Tuple[BaseCamera, Gravity, Dict[str, torch.Tensor]]: Optimized camera, gravity
@@ -569,7 +712,7 @@ class LMOptimizer(nn.Module):
         B = data[key].shape[0]
 
         lamb = data[key].new_ones(B) * self.conf.lambda_
-        if self.shared_intrinsics:
+        if self.shared_intrinsics or camera_R_rig is not None:
             lamb = data[key].new_ones(1) * self.conf.lambda_
 
         infos = {"stop_at": self.num_steps}
@@ -593,17 +736,23 @@ class LMOptimizer(nn.Module):
                 errors,
                 weights,
                 shared_intrinsics=self.shared_intrinsics,
+                camera_R_rig=camera_R_rig,
             )
             delta = optimizer_step(Grad, Hess, lamb)  # (B, N_params)
 
-            if self.shared_intrinsics:
+            if camera_R_rig is not None:
+                if self.shared_intrinsics:
+                    delta = delta.expand(B, -1)
+            elif self.shared_intrinsics:
                 delta_g = delta[..., : -self.n_intrinsic_params].reshape(B, 2)
                 delta_f = delta[..., -self.n_intrinsic_params].expand(B, 1)
                 delta_dist = delta[..., -self.n_intrinsic_params + 1 :].expand(B, -1)
                 delta = torch.cat([delta_g, delta_f, delta_dist], dim=-1)
 
             # calculate new cost
-            camera_opt, gravity_opt = self.update_estimate(camera_opt, gravity_opt, delta)
+            camera_opt, gravity_opt = self.update_estimate(
+                camera_opt, gravity_opt, delta, camera_R_rig=camera_R_rig
+            )
             new_cost, _ = self.calculate_costs(
                 self.calculate_residuals(camera_opt, gravity_opt, data), data
             )
@@ -633,7 +782,9 @@ class LMOptimizer(nn.Module):
         final_cost, weights = self.calculate_costs(final_errors, data)  # (B, N)
 
         if not self.training:
-            infos |= self.estimate_uncertainty(camera_opt, gravity_opt, final_errors, weights)
+            infos |= self.estimate_uncertainty(
+                camera_opt, gravity_opt, final_errors, weights, camera_R_rig=camera_R_rig
+            )
 
         infos["stop_at"] = camera_opt.new_ones(camera_opt.shape[0]) * infos["stop_at"]
         for k, c in final_cost.items():
@@ -647,10 +798,16 @@ class LMOptimizer(nn.Module):
         """Run the LM optimization."""
         camera_init, gravity_init = get_trivial_estimation(data, self.camera_model)
 
+        camera_R_rig = data.get("camera_R_rig", None)
+        if camera_R_rig is not None:
+            gravity_init = initialize_gravity_rig(gravity_init, camera_R_rig)
+
         self.setup_optimization_and_priors(data, shared_intrinsics=self.shared_intrinsics)
 
         start = time.time()
-        camera_opt, gravity_opt, infos = self.optimize(data, camera_init, gravity_init)
+        camera_opt, gravity_opt, infos = self.optimize(
+            data, camera_init, gravity_init, camera_R_rig=camera_R_rig
+        )
 
         if self.conf.verbose:
             logger.info(f"Optimization took {(time.time() - start)*1000:.2f} ms")
