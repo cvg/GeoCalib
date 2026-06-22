@@ -758,7 +758,7 @@ class LMOptimizer(nn.Module):
             )
             new_cost = sum(c.mean(-1) for c in new_cost.values())
 
-            if not self.conf.fix_lambda and not self.shared_intrinsics:
+            if not self.conf.fix_lambda and not self.shared_intrinsics and camera_R_rig is None:
                 lamb = update_lambda(lamb, prev_cost, new_cost)
 
             if self.conf.verbose:
