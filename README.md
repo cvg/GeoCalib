@@ -140,6 +140,13 @@ To calibrate multiple images captured by the same camera, pass a list of images 
 result = model.calibrate(batch, shared_intrinsics=True)
 ```
 
+### Rigid multi-camera rigs
+If several cameras are rigidly mounted (known relative rotations), GeoCalib can estimate a single shared gravity direction for the whole rig:
+```python
+# camera_R_rig[i]: rotation from the rig frame to camera i.
+result = model.calibrate(batch, camera_R_rig=camera_R_rig)  # add shared_intrinsics=True if the cameras are identical
+```
+
 ## Evaluation
 
 The full evaluation and training code is provided in the single-image calibration library [`siclib`](siclib), which can be installed as:

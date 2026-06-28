@@ -1,4 +1,4 @@
-"""Implementation of MSCAN from SegNeXt: Rethinking Convolutional Attention Design for Semantic 
+"""Implementation of MSCAN from SegNeXt: Rethinking Convolutional Attention Design for Semantic
 Segmentation (NeurIPS 2022) adapted from
 
 https://github.com/Visual-Attention-Network/SegNeXt/blob/main/mmseg/models/backbones/mscan.py

@@ -75,24 +75,24 @@ class GeoCalib(nn.Module):
         camera_model: str = "pinhole",
         priors: Optional[Dict[str, torch.Tensor]] = None,
         shared_intrinsics: bool = False,
+        camera_R_rig: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """Perform calibration with online resizing.
 
         Assumes input image is in range [0, 1] and in RGB format.
 
         Args:
-            img (torch.Tensor): Input image, shape (C, H, W) or (1, C, H, W)
+            img (torch.Tensor): Input image, shape (C, H, W) or (1, C, H, W) or (B, C, H, W)
             camera_model (str, optional): Camera model. Defaults to "pinhole".
             priors (Dict[str, torch.Tensor], optional): Prior parameters. Defaults to {}.
             shared_intrinsics (bool, optional): Whether to share intrinsics. Defaults to False.
+            camera_R_rig (torch.Tensor, optional): Rotations from rig to cameras. Defaults to None.
 
         Returns:
             Dict[str, torch.Tensor]: camera and gravity vectors and uncertainties.
         """
         if len(img.shape) == 3:
             img = img[None]  # add batch dim
-        if not shared_intrinsics:
-            assert len(img.shape) == 4 and img.shape[0] == 1
 
         img_data = self.image_processor(img)
 
@@ -100,7 +100,7 @@ class GeoCalib(nn.Module):
             priors = {}
 
         prior_values = {}
-        if prior_focal := priors.get("focal"):
+        if (prior_focal := priors.get("focal")) is not None:
             prior_focal = prior_focal[None] if len(prior_focal.shape) == 0 else prior_focal
             prior_values["prior_focal"] = prior_focal * img_data["scales"][1]
 
@@ -112,7 +112,7 @@ class GeoCalib(nn.Module):
         self.model.optimizer.set_camera_model(camera_model)
         self.model.optimizer.shared_intrinsics = shared_intrinsics
 
-        out = self.model(img_data | prior_values)
+        out = self.model(img_data | prior_values | {"camera_R_rig": camera_R_rig})
 
         camera, gravity = out["camera"], out["gravity"]
         camera, out = self._post_process(camera, img_data, out)
