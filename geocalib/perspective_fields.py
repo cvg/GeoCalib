@@ -95,7 +95,7 @@ def J_up_field(
         gravity (Gravity): Gravity vector.
         spherical (bool, optional): Whether to use spherical coordinates. Defaults to False.
         log_focal (bool, optional): Whether to use log-focal length. Defaults to False.
-        camera_R_rig (torch.Tensor, optional): Rigid rotations from rig to cameras. Defaults to None.
+        camera_R_rig (torch.Tensor, optional): Rotations from rig to cameras. Defaults to None.
 
     Returns:
         torch.Tensor: Jacobian of the up field as a tensor of shape (..., h, w, 2, 2, 3).
@@ -139,7 +139,8 @@ def J_up_field(
 
     if camera_R_rig is not None:
         J_proj2abc = torch.einsum("bnij,bjk->bnik", J_proj2abc, camera_R_rig)
-        g_rig = gravity[0:1]
+        # g_rig = R0^T @ g0
+        g_rig = Gravity(torch.einsum("...ij,...i->...j", camera_R_rig[:1], gravity.vec3d[:1]))
         J_abc2delta = SphericalManifold.J_plus(g_rig.vec3d) if spherical else g_rig.J_rp()
         J_proj2delta = torch.einsum("bnij,jk->bnik", J_proj2abc, J_abc2delta[0])
     else:
@@ -236,7 +237,7 @@ def J_latitude_field(
         gravity (Gravity): Gravity vector.
         spherical (bool, optional): Whether to use spherical coordinates. Defaults to False.
         log_focal (bool, optional): Whether to use log-focal length. Defaults to False.
-        camera_R_rig (torch.Tensor, optional): Rigid rotations from rig to cameras. Defaults to None.
+        camera_R_rig (torch.Tensor, optional): Rotations from rig to cameras. Defaults to None.
 
     Returns:
         torch.Tensor: Jacobian of the latitude field as a tensor of shape (..., h, w, 1, 3).
@@ -261,7 +262,8 @@ def J_latitude_field(
     ######################
 
     if camera_R_rig is not None:
-        g_rig = gravity[0:1]
+        # g_rig = R0^T @ g0
+        g_rig = Gravity(torch.einsum("...ij,...i->...j", camera_R_rig[:1], gravity.vec3d[:1]))
         J_abc2delta = SphericalManifold.J_plus(g_rig.vec3d) if spherical else g_rig.J_rp()
         uv1_norm_rotated = torch.einsum("bNi,bij->bNj", uv1_norm, camera_R_rig)
         J_delta = torch.einsum("bNj,jk->bNk", uv1_norm_rotated, J_abc2delta[0])
@@ -360,7 +362,7 @@ def J_perspective_field(
         use_latitude (bool, optional): Whether to include the latitude field. Defaults to True.
         spherical (bool, optional): Whether to use spherical coordinates. Defaults to False.
         log_focal (bool, optional): Whether to use log-focal length. Defaults to False.
-        camera_R_rig (torch.Tensor, optional): Rigid rotations from rig to cameras. Defaults to None.
+        camera_R_rig (torch.Tensor, optional): Rotations from rig to cameras. Defaults to None.
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: Up and latitude jacobians as tensors of shape
@@ -381,7 +383,9 @@ def J_perspective_field(
         J_up = camera.new_zeros(shape)
 
     if use_latitude:
-        J_lat = J_latitude_field(camera, gravity, spherical, log_focal, camera_R_rig)  # (..., h, w, 1, 4)
+        J_lat = J_latitude_field(
+            camera, gravity, spherical, log_focal, camera_R_rig
+        )  # (..., h, w, 1, 4)
     else:
         shape = (camera.shape[0], h, w, 1, 4)
         J_lat = camera.new_zeros(shape)

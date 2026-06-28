@@ -75,7 +75,9 @@ def sample_rig(
     gravity = Gravity.from_rp(rolls, pitches).float().to(device)
 
     R = rad2rotmat(rolls, pitches, yaws)  # cam_i_from_world
-    camera_R_rig = (R @ R[0].transpose(-1, -2)).float().to(device)
+    rf = deg2rad(rand(-180, 180, 3))  # arbitrary rig frame, not aligned to any camera (R0 != I)
+    R_rig = rad2rotmat(rf[0:1], rf[1:2], rf[2:3])
+    camera_R_rig = (R @ R_rig.transpose(-1, -2)).float().to(device)
 
     return {
         "cam": cam,

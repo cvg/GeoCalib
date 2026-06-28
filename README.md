@@ -144,7 +144,6 @@ result = model.calibrate(batch, shared_intrinsics=True)
 If several cameras are rigidly mounted (known relative rotations), GeoCalib can estimate a single shared gravity direction for the whole rig:
 ```python
 # camera_R_rig[i]: rotation from the rig frame to camera i.
-# The rig frame is the first camera, so camera_R_rig[0] must be the identity.
 result = model.calibrate(batch, camera_R_rig=camera_R_rig)  # add shared_intrinsics=True if the cameras are identical
 ```
 

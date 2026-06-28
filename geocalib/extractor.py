@@ -86,7 +86,7 @@ class GeoCalib(nn.Module):
             camera_model (str, optional): Camera model. Defaults to "pinhole".
             priors (Dict[str, torch.Tensor], optional): Prior parameters. Defaults to {}.
             shared_intrinsics (bool, optional): Whether to share intrinsics. Defaults to False.
-            camera_R_rig (torch.Tensor, optional): Rigid rotations from rig to cameras. Defaults to None.
+            camera_R_rig (torch.Tensor, optional): Rotations from rig to cameras. Defaults to None.
 
         Returns:
             Dict[str, torch.Tensor]: camera and gravity vectors and uncertainties.
