@@ -1,20 +1,4 @@
-GeoCalib model weights
 Copyright 2024 ETH Zurich
-
-The trained GeoCalib model weights, including geocalib-pinhole.tar and
-geocalib-distorted.tar, are licensed under the Creative Commons Attribution
-4.0 International Public License (CC BY 4.0), reproduced below and available
-at https://creativecommons.org/licenses/by/4.0/legalcode.
-
-The source code in this repository is licensed separately under the Apache
-License 2.0 (see LICENSE).
-
-The weights were trained in part on the Laval Indoor HDR dataset
-(http://hdrdb.com/indoor/). We thank its authors for permitting the release
-of the trained weights under this license. The dataset itself is not
-included or redistributed and remains subject to its own license.
-
-=======================================================================
 
 Attribution 4.0 International
 

@@ -657,5 +657,5 @@ If you use any ideas from the paper or code from this repo, please consider citi
 
 ## License
 
-The code is provided under the [Apache-2.0 License](LICENSE) while the weights of the trained model are provided under the [Creative Commons Attribution 4.0 International Public License](https://creativecommons.org/licenses/by/4.0/legalcode). Thanks to the authors of the [Laval Indoor HDR dataset](http://hdrdb.com/indoor/#presentation) for allowing this.
+The code is provided under the [Apache-2.0 License](LICENSE) while the weights of the trained models (`geocalib-pinhole` and `geocalib-distorted`) are provided under the [Creative Commons Attribution 4.0 International Public License](LICENSE-WEIGHTS). Thanks to the authors of the [Laval Indoor HDR dataset](http://hdrdb.com/indoor/#presentation) for allowing this.
 
