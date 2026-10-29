@@ -127,8 +127,17 @@ class NMF2D(nn.Module):
         self.train_steps = 6
         self.eval_steps = 7
         self.inv_t = 1
+        self.register_buffer("fixed_bases", None, persistent=False)
+
+    def freeze_bases(self, seed: int = 0) -> None:
+        """Fix the initial NMF bases to a deterministic tensor."""
+        gen = torch.Generator(device="cpu").manual_seed(seed)
+        bases = torch.rand((1, self.D, self.R), generator=gen, dtype=torch.float32)
+        self.fixed_bases = F.normalize(bases, dim=1)
 
     def _build_bases(self, B: int, S: int, D: int, R: int, device: str = "cpu") -> torch.Tensor:
+        if self.fixed_bases is not None:
+            return self.fixed_bases.expand(B * S, D, R).to(device)
         bases = torch.rand((B * S, D, R)).to(device)
         return F.normalize(bases, dim=1)
 
@@ -264,10 +273,15 @@ class LightHamHead(nn.Module):
         inputs = [features["hl"][i] for i in self.in_index]
 
         inputs = [
-            F.interpolate(
-                level, size=inputs[0].shape[2:], mode="bilinear", align_corners=self.align_corners
+            level
+            if i == 0
+            else F.interpolate(
+                level,
+                scale_factor=float(2**i),
+                mode="bilinear",
+                align_corners=self.align_corners,
             )
-            for level in inputs
+            for i, level in enumerate(inputs)
         ]
 
         inputs = torch.cat(inputs, dim=1)
@@ -278,9 +292,9 @@ class LightHamHead(nn.Module):
         feats = self.align(x)
 
         assert "ll" in features, "Low-level features are required for this model"
-        feats = F.interpolate(feats, scale_factor=2, mode="bilinear", align_corners=False)
+        feats = F.interpolate(feats, scale_factor=2.0, mode="bilinear", align_corners=False)
         feats = self.out_conv(feats)
-        feats = F.interpolate(feats, scale_factor=2, mode="bilinear", align_corners=False)
+        feats = F.interpolate(feats, scale_factor=2.0, mode="bilinear", align_corners=False)
         feats = self.ll_fusion(feats, features["ll"].clone())
 
         uncertainty = self.linear_pred_uncertainty(feats).squeeze(1)

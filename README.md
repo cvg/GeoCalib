@@ -147,6 +147,17 @@ If several cameras are rigidly mounted (known relative rotations), GeoCalib can 
 result = model.calibrate(batch, camera_R_rig=camera_R_rig)  # add shared_intrinsics=True if the cameras are identical
 ```
 
+## ONNX export
+
+GeoCalib's perspective field network can be exported to [ONNX](https://onnx.ai/) and run with [ONNX Runtime](https://onnxruntime.ai/) without PyTorch, as used by [COLMAP](https://github.com/colmap/colmap).
+
+To export the model (requires `onnx`) and check it against the PyTorch implementation (also requires `onnxruntime`):
+```bash
+python onnx/export.py
+python onnx/check.py --model onnx/models/geocalib_distorted.onnx
+```
+`onnx/check.py` can check any exported model against a PyTorch checkpoint (`--weights`).
+
 ## Evaluation
 
 The full evaluation and training code is provided in the single-image calibration library [`siclib`](siclib), which can be installed as:

@@ -8,7 +8,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from geocalib.lm_optimizer import LMOptimizer
-from geocalib.modules import MSCAN, ConvModule, LightHamHead
+from geocalib.modules import MSCAN, NMF2D, ConvModule, LightHamHead
 
 # mypy: ignore-errors
 
@@ -105,10 +105,21 @@ class GeoCalib(nn.Module):
 
         self.optimizer = LMOptimizer({**optimizer_options})
 
+    def predict_fields(self, image: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """Predict perspective fields and confidences for a batch of images."""
+        data = {"image": image}
+        features = {"hl": self.backbone(data)["features"], "ll": self.ll_enc(data)["features"]}
+        return self.perspective_decoder({"features": features})
+
+    def freeze_nmf_bases(self, seed: int = 0) -> None:
+        """Fix the initial NMF2D bases in the decoder to a deterministic tensor."""
+        for module in self.perspective_decoder.modules():
+            if isinstance(module, NMF2D):
+                module.freeze_bases(seed=seed)
+
     def forward(self, data: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Forward pass."""
-        features = {"hl": self.backbone(data)["features"], "ll": self.ll_enc(data)["features"]}
-        out = self.perspective_decoder({"features": features})
+        out = self.predict_fields(data["image"])
 
         out |= {
             k: data[k]
